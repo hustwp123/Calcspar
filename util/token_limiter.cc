@@ -66,9 +66,9 @@ std::string TokenLimiter::IOSourceToString(Env::IOSource io_src) {
 
 TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
-      available_tokens_(0),
-      next_refill_sec_(TokenLimiter::NowSec(env_) + 1),
-      wait_threshold_ns_{900 * 1000000, 700 * 1000000, 500 * 1000000, 0},
+      available_tokens_(token_per_sec),
+      next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
+      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),
@@ -112,21 +112,21 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type) {
     return;
   }
 
-  uint64_t arrive_ns = env_->NowNanos();
-  uint64_t arrive_sec = arrive_ns / std::nano::den;
-  uint64_t arrive_sec_in_ns = arrive_sec * std::nano::den;
+  uint64_t arrive_us = env_->NowMicros();
+  uint64_t arrive_sec = arrive_us / std::micro::den;
+  uint64_t arrive_sec_in_us = arrive_sec * std::micro::den;
   // we can not take token in previous second, so we need to check for refill
   RefillIfNeeded(arrive_sec);
   // ?should we design to signal to the waiter here
 
   if (available_tokens_ > 0 &&
-      arrive_ns >= arrive_sec_in_ns + wait_threshold_ns_[io_src] &&
+      arrive_us >= arrive_sec_in_us + wait_threshold_us_[io_src] &&
       queues_[io_src].empty()) {
     available_tokens_--;
     return;
   }
 
-  Req req(&request_mutex_, arrive_ns);
+  Req req(&request_mutex_);
   queues_[io_src].push_back(&req);
 
   do {
@@ -144,9 +144,9 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type) {
       req.cv_.TimedWait(CalcWakeMicros());
       // grant the lock again, it is safe to set to false
       has_pending_waiter_ = false;
-      uint64_t wake_up_ns = env_->NowNanos();
-      RefillIfNeeded(wake_up_ns / std::nano::den);
-      DispatchToken(wake_up_ns);
+      uint64_t wake_up_us = env_->NowMicros();
+      RefillIfNeeded(wake_up_us / std::micro::den);
+      DispatchToken(wake_up_us);
       // (1) we have token and exit queue now, since we are the waiter,
       //     we should wake up one waiter for next tick
       // (2) we don't have token, just enter next loop to wait
@@ -180,9 +180,9 @@ bool TokenLimiter::RefillIfNeeded(uint64_t now_sec) {
 }
 
 uint64_t TokenLimiter::CalcWakeMicros() {
-  uint64_t now_ns = env_->NowNanos();
-  uint64_t now_sec_in_ns = (now_ns / std::nano::den) * std::nano::den;
-  if (now_sec_in_ns >= next_refill_sec_ * std::nano::den) {
+  uint64_t now_us = env_->NowMicros();
+  uint64_t now_sec_in_us = (now_us / std::micro::den) * std::micro::den;
+  if (now_sec_in_us >= next_refill_sec_ * std::micro::den) {
     return next_refill_sec_ * std::micro::den;
   }
   if (available_tokens_ == 0) {
@@ -191,18 +191,18 @@ uint64_t TokenLimiter::CalcWakeMicros() {
   }
 
   for (int i = Env::IO_SRC_USER; i >= Env::IO_SRC_PREFETCH; i--) {
-    if (now_ns < now_sec_in_ns + wait_threshold_ns_[i]) {
-      return (now_sec_in_ns + wait_threshold_ns_[i]) / 1000;
+    if (now_us < now_sec_in_us + wait_threshold_us_[i]) {
+      return now_sec_in_us + wait_threshold_us_[i];
     }
   }
   return next_refill_sec_ * std::micro::den;
 }
 
-void TokenLimiter::DispatchToken(uint64_t now_ns) {
-  uint64_t now_sec_in_ns = (now_ns / std::nano::den) * std::nano::den;
+void TokenLimiter::DispatchToken(uint64_t now_us) {
+  uint64_t now_sec_in_us = (now_us / std::micro::den) * std::micro::den;
   for (int i = Env::IO_SRC_USER;
        i >= Env::IO_SRC_PREFETCH && available_tokens_ > 0; i--) {
-    if (now_ns < now_sec_in_ns + wait_threshold_ns_[i]) {
+    if (now_us < now_sec_in_us + wait_threshold_us_[i]) {
       break;
     }
     while (!queues_[i].empty() && available_tokens_ > 0) {
@@ -216,13 +216,13 @@ void TokenLimiter::DispatchToken(uint64_t now_ns) {
 }
 
 void TokenLimiter::TunePrefetch() {
-  uint64_t prev = wait_threshold_ns_[Env::IO_SRC_PREFETCH];
+  uint64_t prev = wait_threshold_us_[Env::IO_SRC_PREFETCH];
   if (available_tokens_ > 0) {
-    wait_threshold_ns_[Env::IO_SRC_PREFETCH] = std::max(
-        prev - 50 * 1000000, wait_threshold_ns_[Env::IO_SRC_PREFETCH + 1]);
+    wait_threshold_us_[Env::IO_SRC_PREFETCH] = std::max(
+        prev - 50 * 1000, wait_threshold_us_[Env::IO_SRC_PREFETCH + 1]);
   } else {
-    wait_threshold_ns_[Env::IO_SRC_PREFETCH] =
-        std::min(prev + 50 * 1000000, (uint64_t)900 * 1000000);
+    wait_threshold_us_[Env::IO_SRC_PREFETCH] =
+        std::min(prev + 50 * 1000, (uint64_t)900 * 1000);
   }
 }
 
