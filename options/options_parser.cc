@@ -218,8 +218,9 @@ Status RocksDBOptionsParser::Parse(const std::string& file_name, Env* env,
   std::string line;
   bool has_data = true;
   // we only support single-lined statement.
-  for (int line_num = 1;
-       ReadOneLine(&iss, seq_file.get(), &line, &has_data, &s); ++line_num) {
+  for (int line_num = 1; ReadOneLine(&iss, seq_file.get(), &line, &has_data, &s,
+                                     Env::IO_SRC_DEFAULT);
+       ++line_num) {
     if (!s.ok()) {
       return s;
     }

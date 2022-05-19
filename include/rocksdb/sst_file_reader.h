@@ -23,7 +23,8 @@ class SstFileReader {
   ~SstFileReader();
 
   // Prepares to read from the file located at "file_path".
-  Status Open(const std::string& file_path);
+  Status Open(const std::string& file_path,
+              const ReadOptions& read_options = ReadOptions(Env::IO_SRC_USER));
 
   // Returns a new iterator over the table contents.
   // Most read options provide the same control as we read from DB.
@@ -33,7 +34,7 @@ class SstFileReader {
   std::shared_ptr<const TableProperties> GetTableProperties() const;
 
   // Verifies whether there is corruption in this table.
-  Status VerifyChecksum();
+  Status VerifyChecksum(const ReadOptions& read_options);
 
  private:
   struct Rep;

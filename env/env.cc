@@ -358,7 +358,7 @@ Status ReadFileToString(Env* env, const std::string& fname, std::string* data) {
   char* space = new char[kBufferSize];
   while (true) {
     Slice fragment;
-    s = file->Read(kBufferSize, &fragment, space);
+    s = file->Read(kBufferSize, &fragment, space, Env::IO_SRC_DEFAULT);
     if (!s.ok()) {
       break;
     }

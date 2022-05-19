@@ -654,6 +654,7 @@ set(SOURCES
         util/string_util.cc
         util/thread_local.cc
         util/threadpool_imp.cc
+        util/token_limiter.cc
         util/xxhash.cc
         utilities/backupable/backupable_db.cc
         utilities/blob_db/blob_compaction_filter.cc
@@ -1104,4 +1105,9 @@ endif()
 option(WITH_TOOLS "build with tools" ON)
 if(WITH_TOOLS)
   add_subdirectory(tools)
+endif()
+
+option(WITH_EXAMPLES "build with examples" OFF)
+if(WITH_EXAMPLES)
+  add_subdirectory(examples)
 endif()

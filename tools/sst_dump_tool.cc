@@ -6,8 +6,6 @@
 //
 #ifndef ROCKSDB_LITE
 
-#include "tools/sst_dump_tool_imp.h"
-
 #include <cinttypes>
 #include <iostream>
 #include <map>
@@ -18,9 +16,11 @@
 #include "db/memtable.h"
 #include "db/write_batch_internal.h"
 #include "options/cf_options.h"
+#include "port/port.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/iterator.h"
+#include "rocksdb/options.h"
 #include "rocksdb/slice_transform.h"
 #include "rocksdb/status.h"
 #include "rocksdb/table_properties.h"
@@ -33,10 +33,9 @@
 #include "table/meta_blocks.h"
 #include "table/plain/plain_table_factory.h"
 #include "table/table_reader.h"
+#include "tools/sst_dump_tool_imp.h"
 #include "util/compression.h"
 #include "util/random.h"
-
-#include "port/port.h"
 
 namespace rocksdb {
 
@@ -92,8 +91,8 @@ Status SstFileDumper::GetTableReader(const std::string& file_path) {
   file_.reset(new RandomAccessFileReader(std::move(file), file_path));
 
   if (s.ok()) {
-    s = ReadFooterFromFile(file_.get(), nullptr /* prefetch_buffer */,
-                           file_size, &footer);
+    s = ReadFooterFromFile(ReadOptions(Env::IO_SRC_DEFAULT), file_.get(),
+                           nullptr /* prefetch_buffer */, file_size, &footer);
   }
   if (s.ok()) {
     magic_number = footer.table_magic_number();
@@ -130,6 +129,7 @@ Status SstFileDumper::NewTableReader(
   // BlockBasedTable
   if (BlockBasedTableFactory::kName == options_.table_factory->Name()) {
     return options_.table_factory->NewTableReader(
+        ReadOptions(Env::IO_SRC_DEFAULT),
         TableReaderOptions(ioptions_, moptions_.prefix_extractor.get(),
                            soptions_, internal_comparator_),
         std::move(file_), file_size, &table_reader_, /*enable_prefetch=*/false);
@@ -137,13 +137,15 @@ Status SstFileDumper::NewTableReader(
 
   // For all other factory implementation
   return options_.table_factory->NewTableReader(
+      ReadOptions(Env::IO_SRC_DEFAULT),
       TableReaderOptions(ioptions_, moptions_.prefix_extractor.get(), soptions_,
                          internal_comparator_),
       std::move(file_), file_size, &table_reader_);
 }
 
 Status SstFileDumper::VerifyChecksum() {
-  return table_reader_->VerifyChecksum(TableReaderCaller::kSSTDumpTool);
+  return table_reader_->VerifyChecksum(ReadOptions(Env::IO_SRC_DEFAULT),
+                                       TableReaderCaller::kSSTDumpTool);
 }
 
 Status SstFileDumper::DumpTable(const std::string& out_filename) {
@@ -229,7 +231,8 @@ Status SstFileDumper::ReadTableProperties(uint64_t table_magic_number,
                                           RandomAccessFileReader* file,
                                           uint64_t file_size) {
   TableProperties* table_properties = nullptr;
-  Status s = rocksdb::ReadTableProperties(file, file_size, table_magic_number,
+  Status s = rocksdb::ReadTableProperties(ReadOptions(Env::IO_SRC_DEFAULT),
+                                          file, file_size, table_magic_number,
                                           ioptions_, &table_properties);
   if (s.ok()) {
     table_properties_.reset(table_properties);

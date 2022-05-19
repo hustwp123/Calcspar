@@ -28,7 +28,8 @@ class TableReader;
 
 class CuckooTableReader: public TableReader {
  public:
-  CuckooTableReader(const ImmutableCFOptions& ioptions,
+  CuckooTableReader(const ReadOptions& read_options,
+                    const ImmutableCFOptions& ioptions,
                     std::unique_ptr<RandomAccessFileReader>&& file,
                     uint64_t file_size, const Comparator* user_comparator,
                     uint64_t (*get_slice_hash)(const Slice&, uint32_t,

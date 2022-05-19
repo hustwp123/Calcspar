@@ -36,7 +36,8 @@ SstFileReader::SstFileReader(const Options& options) : rep_(new Rep(options)) {}
 
 SstFileReader::~SstFileReader() {}
 
-Status SstFileReader::Open(const std::string& file_path) {
+Status SstFileReader::Open(const std::string& file_path,
+                           const ReadOptions& read_options) {
   auto r = rep_.get();
   Status s;
   uint64_t file_size = 0;
@@ -54,7 +55,8 @@ Status SstFileReader::Open(const std::string& file_path) {
                              r->soptions, r->ioptions.internal_comparator);
     // Allow open file with global sequence number for backward compatibility.
     t_opt.largest_seqno = kMaxSequenceNumber;
-    s = r->options.table_factory->NewTableReader(t_opt, std::move(file_reader),
+    s = r->options.table_factory->NewTableReader(read_options, t_opt,
+                                                 std::move(file_reader),
                                                  file_size, &r->table_reader);
   }
   return s;
@@ -79,8 +81,9 @@ std::shared_ptr<const TableProperties> SstFileReader::GetTableProperties()
   return rep_->table_reader->GetTableProperties();
 }
 
-Status SstFileReader::VerifyChecksum() {
-  return rep_->table_reader->VerifyChecksum(TableReaderCaller::kSSTFileReader);
+Status SstFileReader::VerifyChecksum(const ReadOptions& read_options) {
+  return rep_->table_reader->VerifyChecksum(read_options,
+                                            TableReaderCaller::kSSTFileReader);
 }
 
 }  // namespace rocksdb

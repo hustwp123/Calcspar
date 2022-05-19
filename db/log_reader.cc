@@ -233,8 +233,9 @@ void Reader::UnmarkEOFInternal() {
   }
 
   Slice read_buffer;
-  Status status = file_->Read(remaining, &read_buffer,
-    backing_store_ + eof_offset_);
+  Status status =
+      file_->Read(remaining, &read_buffer, backing_store_ + eof_offset_,
+                  Env::IO_SRC_DEFAULT);
 
   size_t added = read_buffer.size();
   end_of_buffer_offset_ += added;
@@ -279,7 +280,8 @@ bool Reader::ReadMore(size_t* drop_size, int *error) {
   if (!eof_ && !read_error_) {
     // Last read was a full read, so this is a trailer to skip
     buffer_.clear();
-    Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
+    Status status =
+        file_->Read(kBlockSize, &buffer_, backing_store_, Env::IO_SRC_DEFAULT);
     end_of_buffer_offset_ += buffer_.size();
     if (!status.ok()) {
       buffer_.clear();
@@ -509,7 +511,8 @@ bool FragmentBufferedReader::TryReadMore(size_t* drop_size, int* error) {
   if (!eof_ && !read_error_) {
     // Last read was a full read, so this is a trailer to skip
     buffer_.clear();
-    Status status = file_->Read(kBlockSize, &buffer_, backing_store_);
+    Status status =
+        file_->Read(kBlockSize, &buffer_, backing_store_, Env::IO_SRC_DEFAULT);
     end_of_buffer_offset_ += buffer_.size();
     if (!status.ok()) {
       buffer_.clear();

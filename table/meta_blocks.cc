@@ -353,7 +353,8 @@ Status ReadProperties(const Slice& handle_value, RandomAccessFileReader* file,
   return s;
 }
 
-Status ReadTableProperties(RandomAccessFileReader* file, uint64_t file_size,
+Status ReadTableProperties(const ReadOptions& read_options,
+                           RandomAccessFileReader* file, uint64_t file_size,
                            uint64_t table_magic_number,
                            const ImmutableCFOptions& ioptions,
                            TableProperties** properties,
@@ -361,20 +362,20 @@ Status ReadTableProperties(RandomAccessFileReader* file, uint64_t file_size,
                            MemoryAllocator* memory_allocator) {
   // -- Read metaindex block
   Footer footer;
-  auto s = ReadFooterFromFile(file, nullptr /* prefetch_buffer */, file_size,
-                              &footer, table_magic_number);
+  auto s = ReadFooterFromFile(read_options, file, nullptr /* prefetch_buffer */,
+                              file_size, &footer, table_magic_number);
   if (!s.ok()) {
     return s;
   }
 
   auto metaindex_handle = footer.metaindex_handle();
   BlockContents metaindex_contents;
-  ReadOptions read_options;
-  read_options.verify_checksums = false;
+  ReadOptions modified_op = read_options;
+  modified_op.verify_checksums = false;
   PersistentCacheOptions cache_options;
 
   BlockFetcher block_fetcher(
-      file, nullptr /* prefetch_buffer */, footer, read_options,
+      file, nullptr /* prefetch_buffer */, footer, modified_op,
       metaindex_handle, &metaindex_contents, ioptions, false /* decompress */,
       false /*maybe_compressed*/, BlockType::kMetaIndex,
       UncompressionDict::GetEmptyDict(), cache_options, memory_allocator);
@@ -423,7 +424,8 @@ Status FindMetaBlock(InternalIterator* meta_index_iter,
   }
 }
 
-Status FindMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
+Status FindMetaBlock(const ReadOptions& read_options,
+                     RandomAccessFileReader* file, uint64_t file_size,
                      uint64_t table_magic_number,
                      const ImmutableCFOptions& ioptions,
                      const std::string& meta_block_name,
@@ -431,23 +433,23 @@ Status FindMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
                      bool /*compression_type_missing*/,
                      MemoryAllocator* memory_allocator) {
   Footer footer;
-  auto s = ReadFooterFromFile(file, nullptr /* prefetch_buffer */, file_size,
-                              &footer, table_magic_number);
+  auto s = ReadFooterFromFile(read_options, file, nullptr /* prefetch_buffer */,
+                              file_size, &footer, table_magic_number);
   if (!s.ok()) {
     return s;
   }
 
   auto metaindex_handle = footer.metaindex_handle();
   BlockContents metaindex_contents;
-  ReadOptions read_options;
-  read_options.verify_checksums = false;
+  ReadOptions modified_op = read_options;
+  modified_op.verify_checksums = false;
   PersistentCacheOptions cache_options;
-  BlockFetcher block_fetcher(
-      file, nullptr /* prefetch_buffer */, footer, read_options,
-      metaindex_handle, &metaindex_contents, ioptions,
-      false /* do decompression */, false /*maybe_compressed*/,
-      BlockType::kMetaIndex, UncompressionDict::GetEmptyDict(), cache_options,
-      memory_allocator);
+  BlockFetcher block_fetcher(file, nullptr /* prefetch_buffer */, footer,
+                             modified_op, metaindex_handle, &metaindex_contents,
+                             ioptions, false /* do decompression */,
+                             false /*maybe_compressed*/, BlockType::kMetaIndex,
+                             UncompressionDict::GetEmptyDict(), cache_options,
+                             memory_allocator);
   s = block_fetcher.ReadBlockContents();
   if (!s.ok()) {
     return s;
@@ -464,7 +466,8 @@ Status FindMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
   return FindMetaBlock(meta_iter.get(), meta_block_name, block_handle);
 }
 
-Status ReadMetaBlock(RandomAccessFileReader* file,
+Status ReadMetaBlock(const ReadOptions& read_options,
+                     RandomAccessFileReader* file,
                      FilePrefetchBuffer* prefetch_buffer, uint64_t file_size,
                      uint64_t table_magic_number,
                      const ImmutableCFOptions& ioptions,
@@ -473,8 +476,8 @@ Status ReadMetaBlock(RandomAccessFileReader* file,
                      MemoryAllocator* memory_allocator) {
   Status status;
   Footer footer;
-  status = ReadFooterFromFile(file, prefetch_buffer, file_size, &footer,
-                              table_magic_number);
+  status = ReadFooterFromFile(read_options, file, prefetch_buffer, file_size,
+                              &footer, table_magic_number);
   if (!status.ok()) {
     return status;
   }
@@ -482,12 +485,12 @@ Status ReadMetaBlock(RandomAccessFileReader* file,
   // Reading metaindex block
   auto metaindex_handle = footer.metaindex_handle();
   BlockContents metaindex_contents;
-  ReadOptions read_options;
-  read_options.verify_checksums = false;
+  ReadOptions modified_op = read_options;
+  modified_op.verify_checksums = false;
   PersistentCacheOptions cache_options;
 
   BlockFetcher block_fetcher(
-      file, prefetch_buffer, footer, read_options, metaindex_handle,
+      file, prefetch_buffer, footer, modified_op, metaindex_handle,
       &metaindex_contents, ioptions, false /* decompress */,
       false /*maybe_compressed*/, BlockType::kMetaIndex,
       UncompressionDict::GetEmptyDict(), cache_options, memory_allocator);

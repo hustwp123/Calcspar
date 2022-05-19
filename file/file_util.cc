@@ -50,7 +50,7 @@ Status CopyFile(Env* env, const std::string& source,
   Slice slice;
   while (size > 0) {
     size_t bytes_to_read = std::min(sizeof(buffer), static_cast<size_t>(size));
-    s = src_reader->Read(bytes_to_read, &slice, buffer);
+    s = src_reader->Read(bytes_to_read, &slice, buffer, Env::IO_SRC_DEFAULT);
     if (!s.ok()) {
       return s;
     }

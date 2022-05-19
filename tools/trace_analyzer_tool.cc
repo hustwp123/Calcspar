@@ -1049,7 +1049,8 @@ Status TraceAnalyzer::ReProcessing() {
       }
       if (wkey_input_f_) {
         for (cfs_[cf_id].w_count = 0;
-             ReadOneLine(&iss, wkey_input_f_.get(), &get_key, &has_data, &s);
+             ReadOneLine(&iss, wkey_input_f_.get(), &get_key, &has_data, &s,
+                         Env::IO_SRC_DEFAULT);
              ++cfs_[cf_id].w_count) {
           if (!s.ok()) {
             fprintf(stderr, "Read whole key space file failed\n");

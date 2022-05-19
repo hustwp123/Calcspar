@@ -116,7 +116,8 @@ Status ReadProperties(const Slice& handle_value, RandomAccessFileReader* file,
 // uncompressed blocks, caller can request to reset compression type by
 // passing compression_type_missing = true, the same applies to
 // `ReadProperties`, `FindMetaBlock`, and `ReadMetaBlock`
-Status ReadTableProperties(RandomAccessFileReader* file, uint64_t file_size,
+Status ReadTableProperties(const ReadOptions& read_options,
+                           RandomAccessFileReader* file, uint64_t file_size,
                            uint64_t table_magic_number,
                            const ImmutableCFOptions& ioptions,
                            TableProperties** properties,
@@ -140,7 +141,8 @@ Status FindMetaBlock(RandomAccessFileReader* file, uint64_t file_size,
 // Read the specified meta block with name meta_block_name
 // from `file` and initialize `contents` with contents of this block.
 // Return Status::OK in case of success.
-Status ReadMetaBlock(RandomAccessFileReader* file,
+Status ReadMetaBlock(const ReadOptions& read_options,
+                     RandomAccessFileReader* file,
                      FilePrefetchBuffer* prefetch_buffer, uint64_t file_size,
                      uint64_t table_magic_number,
                      const ImmutableCFOptions& ioptions,

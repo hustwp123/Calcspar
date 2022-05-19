@@ -106,7 +106,8 @@ class TableReader {
   // Prefetch data corresponding to a give range of keys
   // Typically this functionality is required for table implementations that
   // persists the data on a non volatile storage medium like disk/SSD
-  virtual Status Prefetch(const Slice* begin = nullptr,
+  virtual Status Prefetch(const ReadOptions& read_options,
+                          const Slice* begin = nullptr,
                           const Slice* end = nullptr) {
     (void) begin;
     (void) end;
@@ -121,7 +122,8 @@ class TableReader {
   }
 
   // check whether there is corruption in this db file
-  virtual Status VerifyChecksum(TableReaderCaller /*caller*/) {
+  virtual Status VerifyChecksum(const ReadOptions& read_options,
+                                TableReaderCaller /*caller*/) {
     return Status::NotSupported("VerifyChecksum() not supported");
   }
 };

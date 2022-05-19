@@ -185,7 +185,8 @@ class MockSequentialFile : public SequentialFile {
 
   ~MockSequentialFile() override { file_->Unref(); }
 
-  Status Read(size_t n, Slice* result, char* scratch) override {
+  Status Read(size_t n, Slice* result, char* scratch,
+              Env::IOSource /*io_src*/) override {
     Status s = file_->Read(pos_, n, result, scratch);
     if (s.ok()) {
       pos_ += result->size();
@@ -216,8 +217,8 @@ class MockRandomAccessFile : public RandomAccessFile {
 
   ~MockRandomAccessFile() override { file_->Unref(); }
 
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
     return file_->Read(offset, n, result, scratch);
   }
 
@@ -231,12 +232,13 @@ class MockRandomRWFile : public RandomRWFile {
 
   ~MockRandomRWFile() override { file_->Unref(); }
 
-  Status Write(uint64_t offset, const Slice& data) override {
+  Status Write(uint64_t offset, const Slice& data,
+               Env::IOSource /*io_src*/) override {
     return file_->Write(offset, data);
   }
 
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
     return file_->Read(offset, n, result, scratch);
   }
 

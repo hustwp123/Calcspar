@@ -428,9 +428,10 @@ class VersionBuilder::Rep {
         auto* file_meta = files_meta[file_idx].first;
         int level = files_meta[file_idx].second;
         statuses[file_idx] = table_cache_->FindTable(
-            env_options_, *(base_vstorage_->InternalComparator()),
-            file_meta->fd, &file_meta->table_reader_handle, prefix_extractor,
-            false /*no_io */, true /* record_read_stats */,
+            ReadOptions(Env::IO_SRC_DEFAULT), env_options_,
+            *(base_vstorage_->InternalComparator()), file_meta->fd,
+            &file_meta->table_reader_handle, prefix_extractor, false /*no_io */,
+            true /* record_read_stats */,
             internal_stats->GetFileReadHist(level), false, level,
             prefetch_index_and_filter_in_cache);
         if (file_meta->table_reader_handle != nullptr) {

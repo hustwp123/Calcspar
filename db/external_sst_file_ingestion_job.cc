@@ -3,6 +3,7 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 
+#include "rocksdb/options.h"
 #ifndef ROCKSDB_LITE
 
 #include "db/external_sst_file_ingestion_job.h"
@@ -341,6 +342,7 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
                                                    external_file));
 
   status = cfd_->ioptions()->table_factory->NewTableReader(
+      ReadOptions(Env::IO_SRC_DEFAULT),
       TableReaderOptions(*cfd_->ioptions(),
                          sv->mutable_cf_options.prefix_extractor.get(),
                          env_options_, cfd_->internal_comparator()),
@@ -351,7 +353,8 @@ Status ExternalSstFileIngestionJob::GetIngestedFileInfo(
 
   if (ingestion_options_.verify_checksums_before_ingest) {
     status =
-        table_reader->VerifyChecksum(TableReaderCaller::kExternalSSTIngestion);
+        table_reader->VerifyChecksum(ReadOptions(Env::IO_SRC_DEFAULT),
+                                     TableReaderCaller::kExternalSSTIngestion);
   }
   if (!status.ok()) {
     return status;
@@ -600,7 +603,8 @@ Status ExternalSstFileIngestionJob::AssignGlobalSeqnoForIngestedFile(
     if (status.ok()) {
       std::string seqno_val;
       PutFixed64(&seqno_val, seqno);
-      status = rwfile->Write(file_to_ingest->global_seqno_offset, seqno_val);
+      status = rwfile->Write(file_to_ingest->global_seqno_offset, seqno_val,
+                             Env::IO_SRC_DEFAULT);
       if (status.ok()) {
         TEST_SYNC_POINT("ExternalSstFileIngestionJob::BeforeSyncGlobalSeqno");
         status = SyncIngestedFile(rwfile.get());

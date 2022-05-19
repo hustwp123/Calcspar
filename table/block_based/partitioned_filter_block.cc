@@ -285,7 +285,8 @@ size_t PartitionedFilterBlockReader::ApproximateMemoryUsage() const {
 }
 
 // TODO(myabandeh): merge this with the same function in IndexReader
-void PartitionedFilterBlockReader::CacheDependencies(bool pin) {
+void PartitionedFilterBlockReader::CacheDependencies(
+    const ReadOptions& read_options, bool pin) {
   assert(table());
 
   const BlockBasedTable::Rep* const rep = table()->get_rep();
@@ -330,10 +331,11 @@ void PartitionedFilterBlockReader::CacheDependencies(bool pin) {
 
   prefetch_buffer.reset(new FilePrefetchBuffer());
   s = prefetch_buffer->Prefetch(rep->file.get(), prefetch_off,
-                                static_cast<size_t>(prefetch_len));
+                                static_cast<size_t>(prefetch_len),
+                                read_options.io_src);
 
   // After prefetch, read the partitions one by one
-  ReadOptions read_options;
+  // ReadOptions read_options;
   for (biter.SeekToFirst(); biter.Valid(); biter.Next()) {
     handle = biter.value().handle;
 

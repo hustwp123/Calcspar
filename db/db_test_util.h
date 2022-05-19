@@ -288,6 +288,10 @@ class SpecialEnv : public EnvWrapper {
       Env::IOPriority GetIOPriority() override {
         return base_->GetIOPriority();
       }
+      void SetIOSource(Env::IOSource io_src) override {
+        base_->SetIOSource(io_src);
+      }
+      Env::IOSource GetIOSource() override { return base_->GetIOSource(); }
       bool use_direct_io() const override {
         return base_->use_direct_io();
       }
@@ -433,15 +437,16 @@ class SpecialEnv : public EnvWrapper {
             counter_(counter),
             bytes_read_(bytes_read) {}
       virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                          char* scratch) const override {
+                          char* scratch, Env::IOSource io_src) const override {
         counter_->Increment();
-        Status s = target_->Read(offset, n, result, scratch);
+        Status s = target_->Read(offset, n, result, scratch, io_src);
         *bytes_read_ += result->size();
         return s;
       }
 
-      virtual Status Prefetch(uint64_t offset, size_t n) override {
-        Status s = target_->Prefetch(offset, n);
+      virtual Status Prefetch(uint64_t offset, size_t n,
+                              Env::IOSource io_src) override {
+        Status s = target_->Prefetch(offset, n, io_src);
         *bytes_read_ += n;
         return s;
       }
@@ -472,9 +477,10 @@ class SpecialEnv : public EnvWrapper {
       CountingFile(std::unique_ptr<SequentialFile>&& target,
                    anon::AtomicCounter* counter)
           : target_(std::move(target)), counter_(counter) {}
-      virtual Status Read(size_t n, Slice* result, char* scratch) override {
+      virtual Status Read(size_t n, Slice* result, char* scratch,
+                          Env::IOSource io_src) override {
         counter_->Increment();
-        return target_->Read(n, result, scratch);
+        return target_->Read(n, result, scratch, io_src);
       }
       virtual Status Skip(uint64_t n) override { return target_->Skip(n); }
 

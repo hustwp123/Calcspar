@@ -1286,7 +1286,10 @@ struct ReadOptions {
   // and the API is subject to change.
   const Slice* timestamp;
 
-  ReadOptions();
+  Env::IOSource io_src = Env::IO_SRC_DEFAULT;
+
+  // ReadOptions();
+  ReadOptions(Env::IOSource io_src = Env::IO_SRC_DEFAULT);
   ReadOptions(bool cksum, bool cache);
 };
 

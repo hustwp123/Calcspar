@@ -1044,7 +1044,8 @@ Status BlobDBImpl::GetBlobValue(const Slice& key, const Slice& index_entry,
   Slice blob_record;
   {
     StopWatch read_sw(env_, statistics_, BLOB_DB_BLOB_FILE_READ_MICROS);
-    s = reader->Read(record_offset, static_cast<size_t>(record_size), &blob_record, buffer);
+    s = reader->Read(record_offset, static_cast<size_t>(record_size),
+                     &blob_record, buffer, Env::IO_SRC_DEFAULT);
     RecordTick(statistics_, BLOB_DB_BLOB_FILE_BYTES_READ, blob_record.size());
   }
   if (!s.ok()) {

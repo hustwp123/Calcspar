@@ -1,3 +1,4 @@
+#include "rocksdb/options.h"
 #ifndef ROCKSDB_LITE
 
 #include "db/import_column_family_job.h"
@@ -202,6 +203,7 @@ Status ImportColumnFamilyJob::GetIngestedFileInfo(
                                                    external_file));
 
   status = cfd_->ioptions()->table_factory->NewTableReader(
+      ReadOptions(Env::IO_SRC_DEFAULT),
       TableReaderOptions(*cfd_->ioptions(),
                          sv->mutable_cf_options.prefix_extractor.get(),
                          env_options_, cfd_->internal_comparator()),

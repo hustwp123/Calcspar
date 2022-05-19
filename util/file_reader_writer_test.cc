@@ -38,6 +38,7 @@ TEST_F(WritableFileWriterTest, RangeSync) {
     Status Sync() override { return Status::OK(); }
     Status Fsync() override { return Status::OK(); }
     void SetIOPriority(Env::IOPriority /*pri*/) override {}
+    void SetIOSource(Env::IOSource /*io_src*/) override {}
     uint64_t GetFileSize() override { return size_; }
     void GetPreallocationStatus(size_t* /*block_size*/,
                                 size_t* /*last_allocated_block*/) override {}
@@ -122,6 +123,7 @@ TEST_F(WritableFileWriterTest, IncrementalBuffer) {
     Status Sync() override { return Status::OK(); }
     Status Fsync() override { return Status::OK(); }
     void SetIOPriority(Env::IOPriority /*pri*/) override {}
+    void SetIOSource(Env::IOSource /*io_src*/) override {}
     uint64_t GetFileSize() override { return size_; }
     void GetPreallocationStatus(size_t* /*block_size*/,
                                 size_t* /*last_allocated_block*/) override {}

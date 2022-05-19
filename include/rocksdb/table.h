@@ -519,6 +519,7 @@ class TableFactory {
   // file_size is the physical file size of the file.
   // table_reader is the output table reader.
   virtual Status NewTableReader(
+      const ReadOptions& read_options,
       const TableReaderOptions& table_reader_options,
       std::unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       std::unique_ptr<TableReader>* table_reader,

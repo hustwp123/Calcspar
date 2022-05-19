@@ -3350,7 +3350,8 @@ void rocksdb_envoptions_destroy(rocksdb_envoptions_t* opt) { delete opt; }
 rocksdb_sstfilewriter_t* rocksdb_sstfilewriter_create(
     const rocksdb_envoptions_t* env, const rocksdb_options_t* io_options) {
   rocksdb_sstfilewriter_t* writer = new rocksdb_sstfilewriter_t;
-  writer->rep = new SstFileWriter(env->rep, io_options->rep);
+  writer->rep =
+      new SstFileWriter(env->rep, io_options->rep, Env::IO_SRC_DEFAULT);
   return writer;
 }
 
@@ -3358,7 +3359,8 @@ rocksdb_sstfilewriter_t* rocksdb_sstfilewriter_create_with_comparator(
     const rocksdb_envoptions_t* env, const rocksdb_options_t* io_options,
     const rocksdb_comparator_t* /*comparator*/) {
   rocksdb_sstfilewriter_t* writer = new rocksdb_sstfilewriter_t;
-  writer->rep = new SstFileWriter(env->rep, io_options->rep);
+  writer->rep =
+      new SstFileWriter(env->rep, io_options->rep, Env::IO_SRC_DEFAULT);
   return writer;
 }
 

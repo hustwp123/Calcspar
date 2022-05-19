@@ -43,9 +43,10 @@ class EncryptedSequentialFile : public SequentialFile {
   // If an error was encountered, returns a non-OK status.
   //
   // REQUIRES: External synchronization
-  Status Read(size_t n, Slice* result, char* scratch) override {
+  Status Read(size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) override {
     assert(scratch);
-    Status status = file_->Read(n, result, scratch);
+    Status status = file_->Read(n, result, scratch, io_src);
     if (!status.ok()) {
       return status;
     }
@@ -89,11 +90,11 @@ class EncryptedSequentialFile : public SequentialFile {
 
   // Positioned Read for direct I/O
   // If Direct I/O enabled, offset, n, and scratch should be properly aligned
-  Status PositionedRead(uint64_t offset, size_t n, Slice* result,
-                        char* scratch) override {
+  Status PositionedRead(uint64_t offset, size_t n, Slice* result, char* scratch,
+                        Env::IOSource io_src) override {
     assert(scratch);
     offset += prefixLength_; // Skip prefix
-    auto status = file_->PositionedRead(offset, n, result, scratch);
+    auto status = file_->PositionedRead(offset, n, result, scratch, io_src);
     if (!status.ok()) {
       return status;
     }
@@ -124,11 +125,11 @@ class EncryptedRandomAccessFile : public RandomAccessFile {
   //
   // Safe for concurrent use by multiple threads.
   // If Direct I/O enabled, offset, n, and scratch should be aligned properly.
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
     assert(scratch);
     offset += prefixLength_;
-    auto status = file_->Read(offset, n, result, scratch);
+    auto status = file_->Read(offset, n, result, scratch, io_src);
     if (!status.ok()) {
       return status;
     }
@@ -137,9 +138,9 @@ class EncryptedRandomAccessFile : public RandomAccessFile {
   }
 
   // Readahead the file starting from offset by n bytes for caching.
-  Status Prefetch(uint64_t offset, size_t n) override {
+  Status Prefetch(uint64_t offset, size_t n, Env::IOSource io_src) override {
     //return Status::OK();
-    return file_->Prefetch(offset + prefixLength_, n);
+    return file_->Prefetch(offset + prefixLength_, n, io_src);
   }
 
   // Tries to get an unique ID for this file that will be the same each time
@@ -326,7 +327,8 @@ class EncryptedRandomRWFile : public RandomRWFile {
 
   // Write bytes in `data` at  offset `offset`, Returns Status::OK() on success.
   // Pass aligned buffer when use_direct_io() returns true.
-  Status Write(uint64_t offset, const Slice& data) override {
+  Status Write(uint64_t offset, const Slice& data,
+               Env::IOSource io_src) override {
     AlignedBuffer buf;
     Status status;
     Slice dataToWrite(data);
@@ -343,18 +345,18 @@ class EncryptedRandomRWFile : public RandomRWFile {
       }
       dataToWrite = Slice(buf.BufferStart(), buf.CurrentSize());
     }
-    status = file_->Write(offset, dataToWrite);
+    status = file_->Write(offset, dataToWrite, io_src);
     return status;
   }
 
   // Read up to `n` bytes starting from offset `offset` and store them in
   // result, provided `scratch` size should be at least `n`.
   // Returns Status::OK() on success.
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
     assert(scratch);
     offset += prefixLength_;
-    auto status = file_->Read(offset, n, result, scratch);
+    auto status = file_->Read(offset, n, result, scratch, io_src);
     if (!status.ok()) {
       return status;
     }
@@ -401,7 +403,8 @@ class EncryptedEnv : public EnvWrapper {
       // Read prefix
       prefixBuf.Alignment(underlying->GetRequiredBufferAlignment());
       prefixBuf.AllocateNewBuffer(prefixLength);
-      status = underlying->Read(prefixLength, &prefixSlice, prefixBuf.BufferStart());
+      status = underlying->Read(prefixLength, &prefixSlice,
+                                prefixBuf.BufferStart(), Env::IO_SRC_DEFAULT);
       if (!status.ok()) {
         return status;
       }
@@ -439,7 +442,8 @@ class EncryptedEnv : public EnvWrapper {
       // Read prefix
       prefixBuf.Alignment(underlying->GetRequiredBufferAlignment());
       prefixBuf.AllocateNewBuffer(prefixLength);
-      status = underlying->Read(0, prefixLength, &prefixSlice, prefixBuf.BufferStart());
+      status = underlying->Read(0, prefixLength, &prefixSlice,
+                                prefixBuf.BufferStart(), Env::IO_SRC_DEFAULT);
       if (!status.ok()) {
         return status;
       }
@@ -615,7 +619,8 @@ class EncryptedEnv : public EnvWrapper {
       prefixBuf.AllocateNewBuffer(prefixLength);
       if (!isNewFile) {
         // File already exists, read prefix
-        status = underlying->Read(0, prefixLength, &prefixSlice, prefixBuf.BufferStart());
+        status = underlying->Read(0, prefixLength, &prefixSlice,
+                                  prefixBuf.BufferStart(), Env::IO_SRC_DEFAULT);
         if (!status.ok()) {
           return status;
         }
@@ -626,7 +631,7 @@ class EncryptedEnv : public EnvWrapper {
         prefixBuf.Size(prefixLength);
         prefixSlice = Slice(prefixBuf.BufferStart(), prefixBuf.CurrentSize());
         // Write prefix
-        status = underlying->Write(0, prefixSlice);
+        status = underlying->Write(0, prefixSlice, Env::IO_SRC_DEFAULT);
         if (!status.ok()) {
           return status;
         }

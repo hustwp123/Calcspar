@@ -154,7 +154,7 @@ Status BlobFile::ReadFooter(BlobLogFooter* bf) {
   Slice result;
   char scratch[BlobLogFooter::kSize + 10];
   Status s = ra_file_reader_->Read(footer_offset, BlobLogFooter::kSize, &result,
-                                   scratch);
+                                   scratch, Env::IO_SRC_DEFAULT);
   if (!s.ok()) return s;
   if (result.size() != BlobLogFooter::kSize) {
     // should not happen
@@ -269,7 +269,8 @@ Status BlobFile::ReadMetadata(Env* env, const EnvOptions& env_options) {
   // Read file header.
   char header_buf[BlobLogHeader::kSize];
   Slice header_slice;
-  s = file_reader->Read(0, BlobLogHeader::kSize, &header_slice, header_buf);
+  s = file_reader->Read(0, BlobLogHeader::kSize, &header_slice, header_buf,
+                        Env::IO_SRC_DEFAULT);
   if (!s.ok()) {
     ROCKS_LOG_ERROR(info_log_,
                     "Failed to read header of blob file %" PRIu64
@@ -303,7 +304,7 @@ Status BlobFile::ReadMetadata(Env* env, const EnvOptions& env_options) {
   char footer_buf[BlobLogFooter::kSize];
   Slice footer_slice;
   s = file_reader->Read(file_size - BlobLogFooter::kSize, BlobLogFooter::kSize,
-                        &footer_slice, footer_buf);
+                        &footer_slice, footer_buf, Env::IO_SRC_DEFAULT);
   if (!s.ok()) {
     ROCKS_LOG_ERROR(info_log_,
                     "Failed to read footer of blob file %" PRIu64
