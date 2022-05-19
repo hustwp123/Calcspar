@@ -40,7 +40,7 @@ Status Truncate(Env* env, const std::string& filename, uint64_t length) {
 
   std::unique_ptr<char[]> scratch(new char[length]);
   rocksdb::Slice result;
-  s = orig_file->Read(length, &result, scratch.get());
+  s = orig_file->Read(length, &result, scratch.get(), Env::IO_SRC_DEFAULT);
 #ifdef OS_WIN
   orig_file.reset();
 #endif
@@ -174,19 +174,20 @@ TestRandomRWFile::~TestRandomRWFile() {
   }
 }
 
-Status TestRandomRWFile::Write(uint64_t offset, const Slice& data) {
+Status TestRandomRWFile::Write(uint64_t offset, const Slice& data,
+                               Env::IOSource io_src) {
   if (!env_->IsFilesystemActive()) {
     return env_->GetError();
   }
-  return target_->Write(offset, data);
+  return target_->Write(offset, data, io_src);
 }
 
 Status TestRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
-                              char* scratch) const {
+                              char* scratch, Env::IOSource io_src) const {
   if (!env_->IsFilesystemActive()) {
     return env_->GetError();
   }
-  return target_->Read(offset, n, result, scratch);
+  return target_->Read(offset, n, result, scratch, io_src);
 }
 
 Status TestRandomRWFile::Close() {

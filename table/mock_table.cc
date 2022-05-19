@@ -65,6 +65,7 @@ std::shared_ptr<const TableProperties> MockTableReader::GetTableProperties()
 MockTableFactory::MockTableFactory() : next_id_(1) {}
 
 Status MockTableFactory::NewTableReader(
+    const ReadOptions& read_options,
     const TableReaderOptions& /*table_reader_options*/,
     std::unique_ptr<RandomAccessFileReader>&& file, uint64_t /*file_size*/,
     std::unique_ptr<TableReader>* table_reader,
@@ -117,7 +118,7 @@ uint32_t MockTableFactory::GetAndWriteNextID(WritableFileWriter* file) const {
 uint32_t MockTableFactory::GetIDFromFile(RandomAccessFileReader* file) const {
   char buf[4];
   Slice result;
-  file->Read(0, 4, &result, buf);
+  file->Read(0, 4, &result, buf, Env::IO_SRC_DEFAULT);
   assert(result.size() == 4);
   return DecodeFixed32(buf);
 }
