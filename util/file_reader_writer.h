@@ -68,7 +68,7 @@ class SequentialFileReader {
   SequentialFileReader(const SequentialFileReader&) = delete;
   SequentialFileReader& operator=(const SequentialFileReader&) = delete;
 
-  Status Read(size_t n, Slice* result, char* scratch);
+  Status Read(size_t n, Slice* result, char* scratch, Env::IOSource io_src);
 
   Status Skip(uint64_t n);
 
@@ -166,12 +166,13 @@ class RandomAccessFileReader {
   RandomAccessFileReader& operator=(const RandomAccessFileReader&) = delete;
 
   Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
-              bool for_compaction = false) const;
+              Env::IOSource io_src, bool for_compaction = false) const;
 
-  Status MultiRead(ReadRequest* reqs, size_t num_reqs) const;
+  Status MultiRead(ReadRequest* reqs, size_t num_reqs,
+                   Env::IOSource io_src) const;
 
-  Status Prefetch(uint64_t offset, size_t n) const {
-    return file_->Prefetch(offset, n);
+  Status Prefetch(uint64_t offset, size_t n, Env::IOSource io_src) const {
+    return file_->Prefetch(offset, n, io_src);
   }
 
   RandomAccessFile* file() { return file_.get(); }
@@ -355,7 +356,7 @@ class FilePrefetchBuffer {
   // n      : the number of bytes to read.
   // for_compaction : if prefetch is done for compaction read.
   Status Prefetch(RandomAccessFileReader* reader, uint64_t offset, size_t n,
-                  bool for_compaction = false);
+                  Env::IOSource io_src, bool for_compaction = false);
 
   // Tries returning the data for a file raed from this buffer, if that data is
   // in the buffer.
@@ -368,7 +369,7 @@ class FilePrefetchBuffer {
   // result : output buffer to put the data into.
   // for_compaction : if cache read is done for compaction read.
   bool TryReadFromCache(uint64_t offset, size_t n, Slice* result,
-                        bool for_compaction = false);
+                        Env::IOSource io_src, bool for_compaction = false);
 
   // The minimum `offset` ever passed to TryReadFromCache(). This will nly be
   // tracked if track_min_offset = true.
@@ -402,6 +403,7 @@ extern Status NewWritableFile(Env* env, const std::string& fname,
 
 // Read a single line from a file.
 bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
-                 std::string* output, bool* has_data, Status* result);
+                 std::string* output, bool* has_data, Status* result,
+                 Env::IOSource io_src);
 
 }  // namespace rocksdb

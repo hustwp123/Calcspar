@@ -27,12 +27,14 @@ const size_t kFadviseTrigger = 1024 * 1024; // 1MB
 
 struct SstFileWriter::Rep {
   Rep(const EnvOptions& _env_options, const Options& options,
-      Env::IOPriority _io_priority, const Comparator* _user_comparator,
-      ColumnFamilyHandle* _cfh, bool _invalidate_page_cache, bool _skip_filters)
+      Env::IOPriority _io_priority, Env::IOSource _io_src,
+      const Comparator* _user_comparator, ColumnFamilyHandle* _cfh,
+      bool _invalidate_page_cache, bool _skip_filters)
       : env_options(_env_options),
         ioptions(options),
         mutable_cf_options(options),
         io_priority(_io_priority),
+        io_src(_io_src),
         internal_comparator(_user_comparator),
         cfh(_cfh),
         invalidate_page_cache(_invalidate_page_cache),
@@ -45,6 +47,7 @@ struct SstFileWriter::Rep {
   ImmutableCFOptions ioptions;
   MutableCFOptions mutable_cf_options;
   Env::IOPriority io_priority;
+  Env::IOSource io_src;
   InternalKeyComparator internal_comparator;
   ExternalSstFileInfo file_info;
   InternalKey ikey;
@@ -157,12 +160,12 @@ struct SstFileWriter::Rep {
 };
 
 SstFileWriter::SstFileWriter(const EnvOptions& env_options,
-                             const Options& options,
+                             const Options& options, Env::IOSource io_src,
                              const Comparator* user_comparator,
                              ColumnFamilyHandle* column_family,
                              bool invalidate_page_cache,
                              Env::IOPriority io_priority, bool skip_filters)
-    : rep_(new Rep(env_options, options, io_priority, user_comparator,
+    : rep_(new Rep(env_options, options, io_priority, io_src, user_comparator,
                    column_family, invalidate_page_cache, skip_filters)) {
   rep_->file_info.file_size = 0;
 }
@@ -185,6 +188,7 @@ Status SstFileWriter::Open(const std::string& file_path) {
   }
 
   sst_file->SetIOPriority(r->io_priority);
+  sst_file->SetIOSource(r->io_src);
 
   CompressionType compression_type;
   CompressionOptions compression_opts;

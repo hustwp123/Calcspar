@@ -1260,7 +1260,8 @@ Status BackupEngineImpl::CopyOrCreateFile(
       size_t buffer_to_read = (copy_file_buffer_size_ < size_limit)
                                   ? copy_file_buffer_size_
                                   : static_cast<size_t>(size_limit);
-      s = src_reader->Read(buffer_to_read, &data, buf.get());
+      s = src_reader->Read(buffer_to_read, &data, buf.get(),
+                           Env::IO_SRC_DEFAULT);
       processed_buffer_size += buffer_to_read;
     } else {
       data = contents;
@@ -1453,7 +1454,7 @@ Status BackupEngineImpl::CalculateChecksum(const std::string& src, Env* src_env,
     }
     size_t buffer_to_read = (copy_file_buffer_size_ < size_limit) ?
       copy_file_buffer_size_ : static_cast<size_t>(size_limit);
-    s = src_reader->Read(buffer_to_read, &data, buf.get());
+    s = src_reader->Read(buffer_to_read, &data, buf.get(), Env::IO_SRC_DEFAULT);
 
     if (!s.ok()) {
       return s;
@@ -1670,7 +1671,8 @@ Status BackupEngineImpl::BackupMeta::LoadFromFile(
       new SequentialFileReader(std::move(backup_meta_file), meta_filename_));
   std::unique_ptr<char[]> buf(new char[max_backup_meta_file_size_ + 1]);
   Slice data;
-  s = backup_meta_reader->Read(max_backup_meta_file_size_, &data, buf.get());
+  s = backup_meta_reader->Read(max_backup_meta_file_size_, &data, buf.get(),
+                               Env::IO_SRC_DEFAULT);
 
   if (!s.ok() || data.size() == max_backup_meta_file_size_) {
     return s.ok() ? Status::Corruption("File size too big") : s;

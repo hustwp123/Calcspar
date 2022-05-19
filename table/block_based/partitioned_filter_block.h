@@ -111,7 +111,7 @@ class PartitionedFilterBlockReader : public FilterBlockReaderCommon<Block> {
                 GetContext* get_context,
                 BlockCacheLookupContext* lookup_context,
                 FilterFunction filter_function) const;
-  void CacheDependencies(bool pin) override;
+  void CacheDependencies(const ReadOptions& read_options, bool pin) override;
 
   const InternalKeyComparator* internal_comparator() const;
   bool index_key_includes_seq() const;

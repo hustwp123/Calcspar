@@ -307,7 +307,7 @@ Status FlushJob::WriteLevel0Table() {
     std::vector<InternalIterator*> memtables;
     std::vector<std::unique_ptr<FragmentedRangeTombstoneIterator>>
         range_del_iters;
-    ReadOptions ro;
+    ReadOptions ro(Env::IO_SRC_FLUSH);
     ro.total_order_seek = true;
     Arena arena;
     uint64_t total_num_entries = 0, total_num_deletes = 0;
@@ -375,9 +375,9 @@ Status FlushJob::WriteLevel0Table() {
           output_compression_, mutable_cf_options_.sample_for_compression,
           cfd_->ioptions()->compression_opts,
           mutable_cf_options_.paranoid_file_checks, cfd_->internal_stats(),
-          TableFileCreationReason::kFlush, event_logger_, job_context_->job_id,
-          Env::IO_HIGH, &table_properties_, 0 /* level */, current_time,
-          oldest_key_time, write_hint, current_time);
+          TableFileCreationReason::kFlush, Env::IO_SRC_FLUSH, event_logger_,
+          job_context_->job_id, Env::IO_HIGH, &table_properties_, 0 /* level */,
+          current_time, oldest_key_time, write_hint, current_time);
       LogFlush(db_options_.info_log);
     }
     ROCKS_LOG_INFO(db_options_.info_log,

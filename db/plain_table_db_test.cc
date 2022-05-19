@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include "rocksdb/options.h"
 #ifndef ROCKSDB_LITE
 
 #include <algorithm>
@@ -63,7 +64,7 @@ TEST_F(PlainTableKeyDecoderTest, ReadNonMmap) {
     for (uint32_t pos = 0; pos < kLength; pos += kReadSize) {
       uint32_t read_size = std::min(kLength - pos, kReadSize);
       Slice out;
-      ASSERT_TRUE(reader.Read(pos, read_size, &out));
+      ASSERT_TRUE(reader.Read(pos, read_size, &out, Env::IO_SRC_DEFAULT));
       ASSERT_EQ(0, out.compare(tmp.substr(pos, read_size)));
     }
 
@@ -88,7 +89,7 @@ TEST_F(PlainTableKeyDecoderTest, ReadNonMmap) {
     PlainTableFileReader reader(file_info.get());
     for (auto p : reads[i]) {
       Slice out;
-      ASSERT_TRUE(reader.Read(p.first, p.second, &out));
+      ASSERT_TRUE(reader.Read(p.first, p.second, &out, Env::IO_SRC_DEFAULT));
       ASSERT_EQ(0, out.compare(tmp.substr(p.first, p.second)));
     }
     ASSERT_EQ(num_file_reads[i], string_source->total_reads());
@@ -280,10 +281,11 @@ class TestPlainTableReader : public PlainTableReader {
                          encoding_type, file_size, table_properties,
                          prefix_extractor),
         expect_bloom_not_match_(expect_bloom_not_match) {
-    Status s = MmapDataIfNeeded();
+    Status s = MmapDataIfNeeded(ReadOptions(Env::IO_SRC_DEFAULT));
     EXPECT_TRUE(s.ok());
 
-    s = PopulateIndex(const_cast<TableProperties*>(table_properties),
+    s = PopulateIndex(ReadOptions(Env::IO_SRC_DEFAULT),
+                      const_cast<TableProperties*>(table_properties),
                       bloom_bits_per_key, hash_table_ratio, index_sparseness,
                       2 * 1024 * 1024);
     EXPECT_TRUE(s.ok());
@@ -336,15 +338,16 @@ class TestPlainTableFactory : public PlainTableFactory {
         column_family_name_(std::move(column_family_name)) {}
 
   Status NewTableReader(
+      const ReadOptions& read_options,
       const TableReaderOptions& table_reader_options,
       std::unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
       std::unique_ptr<TableReader>* table,
       bool /*prefetch_index_and_filter_in_cache*/) const override {
     TableProperties* props = nullptr;
-    auto s =
-        ReadTableProperties(file.get(), file_size, kPlainTableMagicNumber,
-                            table_reader_options.ioptions, &props,
-                            true /* compression_type_missing */);
+    auto s = ReadTableProperties(read_options, file.get(), file_size,
+                                 kPlainTableMagicNumber,
+                                 table_reader_options.ioptions, &props,
+                                 true /* compression_type_missing */);
     EXPECT_TRUE(s.ok());
 
     if (store_index_in_file_) {

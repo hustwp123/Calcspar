@@ -1232,7 +1232,8 @@ Status Version::GetTableProperties(std::shared_ptr<const TableProperties>* tp,
           0 /* hist_type */, nullptr /* file_read_hist */,
           nullptr /* rate_limiter */, ioptions->listeners));
   s = ReadTableProperties(
-      file_reader.get(), file_meta->fd.GetFileSize(),
+      ReadOptions(Env::IO_SRC_DEFAULT), file_reader.get(),
+      file_meta->fd.GetFileSize(),
       Footer::kInvalidTableMagicNumber /* table's magic number */, *ioptions,
       &raw_table_properties, false /* compression_type_missing */);
   if (!s.ok()) {
@@ -5023,7 +5024,7 @@ InternalIterator* VersionSet::MakeInputIterator(
     const Compaction* c, RangeDelAggregator* range_del_agg,
     const EnvOptions& env_options_compactions) {
   auto cfd = c->column_family_data();
-  ReadOptions read_options;
+  ReadOptions read_options(Env::IO_SRC_COMPACTION);
   read_options.verify_checksums = true;
   read_options.fill_cache = false;
   // Compaction iterators shouldn't be confined to a single prefix.

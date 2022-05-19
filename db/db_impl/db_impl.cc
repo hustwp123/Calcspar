@@ -9,6 +9,8 @@
 #include "db/db_impl/db_impl.h"
 
 #include <stdint.h>
+
+#include "rocksdb/options.h"
 #ifdef OS_SOLARIS
 #include <alloca.h>
 #endif
@@ -1444,10 +1446,12 @@ Status DBImpl::Get(const ReadOptions& read_options,
   return GetImpl(read_options, column_family, key, value);
 }
 
-Status DBImpl::GetImpl(const ReadOptions& read_options,
-                       ColumnFamilyHandle* column_family, const Slice& key,
-                       PinnableSlice* pinnable_val, bool* value_found,
-                       ReadCallback* callback, bool* is_blob_index) {
+Status DBImpl::GetImpl(const ReadOptions& ro, ColumnFamilyHandle* column_family,
+                       const Slice& key, PinnableSlice* pinnable_val,
+                       bool* value_found, ReadCallback* callback,
+                       bool* is_blob_index) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
   assert(pinnable_val != nullptr);
   PERF_CPU_TIMER_GUARD(get_cpu_nanos, env_);
   StopWatch sw(env_, stats_, DB_GET);
@@ -1571,9 +1575,12 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
 }
 
 std::vector<Status> DBImpl::MultiGet(
-    const ReadOptions& read_options,
+    const ReadOptions& ro,
     const std::vector<ColumnFamilyHandle*>& column_family,
     const std::vector<Slice>& keys, std::vector<std::string>* values) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
+
   PERF_CPU_TIMER_GUARD(get_cpu_nanos, env_);
   StopWatch sw(env_, stats_, DB_MULTIGET);
   PERF_TIMER_GUARD(get_snapshot_time);
@@ -1784,9 +1791,12 @@ void DBImpl::MultiGet(const ReadOptions& read_options,
 }
 
 void DBImpl::MultiGetImpl(
-    const ReadOptions& read_options, ColumnFamilyHandle* column_family,
+    const ReadOptions& ro, ColumnFamilyHandle* column_family,
     autovector<KeyContext, MultiGetContext::MAX_BATCH_SIZE>& key_context,
     bool sorted_input, ReadCallback* callback, bool* is_blob_index) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
+
   PERF_CPU_TIMER_GUARD(get_cpu_nanos, env_);
   StopWatch sw(env_, stats_, DB_MULTIGET);
   size_t num_keys = key_context.size();
@@ -2231,8 +2241,11 @@ bool DBImpl::KeyMayExist(const ReadOptions& read_options,
   return s.ok() || s.IsIncomplete();
 }
 
-Iterator* DBImpl::NewIterator(const ReadOptions& read_options,
+Iterator* DBImpl::NewIterator(const ReadOptions& ro,
                               ColumnFamilyHandle* column_family) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
+
   if (read_options.managed) {
     return NewErrorIterator(
         Status::NotSupported("Managed iterator is not supported anymore."));
@@ -2280,12 +2293,12 @@ Iterator* DBImpl::NewIterator(const ReadOptions& read_options,
   return result;
 }
 
-ArenaWrappedDBIter* DBImpl::NewIteratorImpl(const ReadOptions& read_options,
-                                            ColumnFamilyData* cfd,
-                                            SequenceNumber snapshot,
-                                            ReadCallback* read_callback,
-                                            bool allow_blob,
-                                            bool allow_refresh) {
+ArenaWrappedDBIter* DBImpl::NewIteratorImpl(
+    const ReadOptions& ro, ColumnFamilyData* cfd, SequenceNumber snapshot,
+    ReadCallback* read_callback, bool allow_blob, bool allow_refresh) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
+
   SuperVersion* sv = cfd->GetReferencedSuperVersion(&mutex_);
 
   // Try to generate a DB iterator tree in continuous memory area to be
@@ -2345,9 +2358,12 @@ ArenaWrappedDBIter* DBImpl::NewIteratorImpl(const ReadOptions& read_options,
 }
 
 Status DBImpl::NewIterators(
-    const ReadOptions& read_options,
+    const ReadOptions& ro,
     const std::vector<ColumnFamilyHandle*>& column_families,
     std::vector<Iterator*>* iterators) {
+  ReadOptions read_options = ro;
+  read_options.io_src = Env::IO_SRC_USER;
+
   if (read_options.managed) {
     return Status::NotSupported("Managed iterator is not supported anymore.");
   }
@@ -3110,7 +3126,8 @@ Status DBImpl::GetDbIdentity(std::string& identity) const {
   char* buffer =
       reinterpret_cast<char*>(alloca(static_cast<size_t>(file_size)));
   Slice id;
-  s = id_file_reader->Read(static_cast<size_t>(file_size), &id, buffer);
+  s = id_file_reader->Read(static_cast<size_t>(file_size), &id, buffer,
+                           Env::IO_SRC_DEFAULT);
   if (!s.ok()) {
     return s;
   }

@@ -579,7 +579,7 @@ DBOptions* DBOptions::IncreaseParallelism(int total_threads) {
 
 #endif  // !ROCKSDB_LITE
 
-ReadOptions::ReadOptions()
+ReadOptions::ReadOptions(Env::IOSource _io_src)
     : snapshot(nullptr),
       iterate_lower_bound(nullptr),
       iterate_upper_bound(nullptr),
@@ -596,7 +596,8 @@ ReadOptions::ReadOptions()
       background_purge_on_iterator_cleanup(false),
       ignore_range_deletions(false),
       iter_start_seqnum(0),
-      timestamp(nullptr) {}
+      timestamp(nullptr),
+      io_src(_io_src) {}
 
 ReadOptions::ReadOptions(bool cksum, bool cache)
     : snapshot(nullptr),

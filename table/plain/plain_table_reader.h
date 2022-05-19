@@ -67,7 +67,8 @@ class PlainTableReader: public TableReader {
 // whether it points to the data offset of the first key with the key prefix
 // or the offset of it. If there are too many keys share this prefix, it will
 // create a binary search-able index from the suffix to offset on disk.
-  static Status Open(const ImmutableCFOptions& ioptions,
+  static Status Open(const ReadOptions& read_options,
+                     const ImmutableCFOptions& ioptions,
                      const EnvOptions& env_options,
                      const InternalKeyComparator& internal_comparator,
                      std::unique_ptr<RandomAccessFileReader>&& file,
@@ -80,10 +81,11 @@ class PlainTableReader: public TableReader {
   // Returns new iterator over table contents
   // compaction_readahead_size: its value will only be used if for_compaction =
   // true
-  InternalIterator* NewIterator(const ReadOptions&,
+  InternalIterator* NewIterator(const ReadOptions& read_options,
                                 const SliceTransform* prefix_extractor,
                                 Arena* arena, bool skip_filters,
-                                TableReaderCaller caller, size_t compaction_readahead_size = 0) override;
+                                TableReaderCaller caller,
+                                size_t compaction_readahead_size = 0) override;
 
   void Prepare(const Slice& target) override;
 
@@ -127,11 +129,11 @@ class PlainTableReader: public TableReader {
   //        the object will be passed.
   //
 
-  Status PopulateIndex(TableProperties* props, int bloom_bits_per_key,
-                       double hash_table_ratio, size_t index_sparseness,
-                       size_t huge_page_tlb_size);
+  Status PopulateIndex(const ReadOptions& read_options, TableProperties* props,
+                       int bloom_bits_per_key, double hash_table_ratio,
+                       size_t index_sparseness, size_t huge_page_tlb_size);
 
-  Status MmapDataIfNeeded();
+  Status MmapDataIfNeeded(const ReadOptions& read_options);
 
  private:
   const InternalKeyComparator internal_comparator_;
@@ -203,7 +205,8 @@ class PlainTableReader: public TableReader {
   // the rows, which contains index records as a list.
   // If bloom_ is not null, all the keys' full-key hash will be added to the
   // bloom filter.
-  Status PopulateIndexRecordList(PlainTableIndexBuilder* index_builder,
+  Status PopulateIndexRecordList(const ReadOptions& read_options,
+                                 PlainTableIndexBuilder* index_builder,
                                  std::vector<uint32_t>* prefix_hashes);
 
   // Internal helper function to allocate memory for bloom filter and fill it
@@ -221,13 +224,15 @@ class PlainTableReader: public TableReader {
   // format.
   // if `seekable` is not null, it will return whether we can directly read
   // data using this offset.
-  Status Next(PlainTableKeyDecoder* decoder, uint32_t* offset,
-              ParsedInternalKey* parsed_key, Slice* internal_key, Slice* value,
+  Status Next(const ReadOptions& read_options, PlainTableKeyDecoder* decoder,
+              uint32_t* offset, ParsedInternalKey* parsed_key,
+              Slice* internal_key, Slice* value,
               bool* seekable = nullptr) const;
   // Get file offset for key target.
   // return value prefix_matched is set to true if the offset is confirmed
   // for a key with the same prefix as target.
-  Status GetOffset(PlainTableKeyDecoder* decoder, const Slice& target,
+  Status GetOffset(const ReadOptions& read_options,
+                   PlainTableKeyDecoder* decoder, const Slice& target,
                    const Slice& prefix, uint32_t prefix_hash,
                    bool& prefix_matched, uint32_t* offset) const;
 

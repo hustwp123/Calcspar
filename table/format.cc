@@ -280,7 +280,8 @@ std::string Footer::ToString() const {
   return result;
 }
 
-Status ReadFooterFromFile(RandomAccessFileReader* file,
+Status ReadFooterFromFile(const ReadOptions& read_options,
+                          RandomAccessFileReader* file,
                           FilePrefetchBuffer* prefetch_buffer,
                           uint64_t file_size, Footer* footer,
                           uint64_t enforce_table_magic_number) {
@@ -300,9 +301,9 @@ Status ReadFooterFromFile(RandomAccessFileReader* file,
   Status s;
   if (prefetch_buffer == nullptr ||
       !prefetch_buffer->TryReadFromCache(read_offset, Footer::kMaxEncodedLength,
-                                         &footer_input)) {
+                                         &footer_input, read_options.io_src)) {
     s = file->Read(read_offset, Footer::kMaxEncodedLength, &footer_input,
-                   footer_space);
+                   footer_space, read_options.io_src);
     if (!s.ok()) return s;
   }
 

@@ -3062,7 +3062,8 @@ void WriteExternalSstFilesCommand::DoCommand() {
     return;
   }
   ColumnFamilyHandle* cfh = GetCfHandle();
-  SstFileWriter sst_file_writer(EnvOptions(), db_->GetOptions(), cfh);
+  SstFileWriter sst_file_writer(EnvOptions(), db_->GetOptions(),
+                                Env::IO_SRC_DEFAULT, cfh);
   Status status = sst_file_writer.Open(output_sst_path_);
   if (!status.ok()) {
     exec_state_ = LDBCommandExecuteResult::Failed("failed to open SST file: " +

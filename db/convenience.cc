@@ -4,6 +4,7 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 
+#include "rocksdb/options.h"
 #ifndef ROCKSDB_LITE
 
 #include "rocksdb/convenience.h"
@@ -51,6 +52,7 @@ Status VerifySstFileChecksum(const Options& options,
       new RandomAccessFileReader(std::move(file), file_path));
   const bool kImmortal = true;
   s = ioptions.table_factory->NewTableReader(
+      ReadOptions(Env::IO_SRC_DEFAULT),
       TableReaderOptions(ioptions, options.prefix_extractor.get(), env_options,
                          internal_comparator, false /* skip_filters */,
                          !kImmortal, -1 /* level */),
@@ -59,7 +61,8 @@ Status VerifySstFileChecksum(const Options& options,
   if (!s.ok()) {
     return s;
   }
-  s = table_reader->VerifyChecksum(TableReaderCaller::kUserVerifyChecksum);
+  s = table_reader->VerifyChecksum(ReadOptions(Env::IO_SRC_DEFAULT),
+                                   TableReaderCaller::kUserVerifyChecksum);
   return s;
 }
 

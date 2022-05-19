@@ -98,7 +98,8 @@ class BlockBasedTable : public TableReader {
   // @param skip_filters Disables loading/accessing the filter block. Overrides
   //    prefetch_index_and_filter_in_cache, so filter will be skipped if both
   //    are set.
-  static Status Open(const ImmutableCFOptions& ioptions,
+  static Status Open(const ReadOptions& read_options,
+                     const ImmutableCFOptions& ioptions,
                      const EnvOptions& env_options,
                      const BlockBasedTableOptions& table_options,
                      const InternalKeyComparator& internal_key_comparator,
@@ -147,7 +148,8 @@ class BlockBasedTable : public TableReader {
   // Pre-fetch the disk blocks that correspond to the key range specified by
   // (kbegin, kend). The call will return error status in the event of
   // IO or iteration error.
-  Status Prefetch(const Slice* begin, const Slice* end) override;
+  Status Prefetch(const ReadOptions& read_options, const Slice* begin,
+                  const Slice* end) override;
 
   // Given a key, return an approximate byte offset in the file where
   // the data for that key begins (or would begin if the key were
@@ -175,7 +177,8 @@ class BlockBasedTable : public TableReader {
   // convert SST file to a human readable form
   Status DumpTable(WritableFile* out_file) override;
 
-  Status VerifyChecksum(TableReaderCaller caller) override;
+  Status VerifyChecksum(const ReadOptions& read_options,
+                        TableReaderCaller caller) override;
 
   ~BlockBasedTable();
 
@@ -205,7 +208,8 @@ class BlockBasedTable : public TableReader {
     virtual size_t ApproximateMemoryUsage() const = 0;
     // Cache the dependencies of the index reader (e.g. the partitions
     // of a partitioned index).
-    virtual void CacheDependencies(bool /* pin */) {}
+    virtual void CacheDependencies(const ReadOptions& /*read_options*/,
+                                   bool /* pin */) {}
   };
 
   class IndexReaderCommon;
@@ -377,7 +381,8 @@ class BlockBasedTable : public TableReader {
   // Optionally, user can pass a preloaded meta_index_iter for the index that
   // need to access extra meta blocks for index construction. This parameter
   // helps avoid re-reading meta index block if caller already created one.
-  Status CreateIndexReader(FilePrefetchBuffer* prefetch_buffer,
+  Status CreateIndexReader(const ReadOptions& read_options,
+                           FilePrefetchBuffer* prefetch_buffer,
                            InternalIterator* preloaded_meta_index_iter,
                            bool use_cache, bool prefetch, bool pin,
                            BlockCacheLookupContext* lookup_context,
@@ -397,11 +402,12 @@ class BlockBasedTable : public TableReader {
                               BlockCacheLookupContext* lookup_context) const;
 
   static Status PrefetchTail(
-      RandomAccessFileReader* file, uint64_t file_size,
-      TailPrefetchStats* tail_prefetch_stats, const bool prefetch_all,
-      const bool preload_all,
+      const ReadOptions& read_options, RandomAccessFileReader* file,
+      uint64_t file_size, TailPrefetchStats* tail_prefetch_stats,
+      const bool prefetch_all, const bool preload_all,
       std::unique_ptr<FilePrefetchBuffer>* prefetch_buffer);
-  Status ReadMetaBlock(FilePrefetchBuffer* prefetch_buffer,
+  Status ReadMetaBlock(const ReadOptions& read_options,
+                       FilePrefetchBuffer* prefetch_buffer,
                        std::unique_ptr<Block>* meta_block,
                        std::unique_ptr<InternalIterator>* iter);
   Status TryReadPropertiesWithGlobalSeqno(FilePrefetchBuffer* prefetch_buffer,
@@ -410,20 +416,23 @@ class BlockBasedTable : public TableReader {
   Status ReadPropertiesBlock(FilePrefetchBuffer* prefetch_buffer,
                              InternalIterator* meta_iter,
                              const SequenceNumber largest_seqno);
-  Status ReadRangeDelBlock(FilePrefetchBuffer* prefetch_buffer,
+  Status ReadRangeDelBlock(const ReadOptions& read_options,
+                           FilePrefetchBuffer* prefetch_buffer,
                            InternalIterator* meta_iter,
                            const InternalKeyComparator& internal_comparator,
                            BlockCacheLookupContext* lookup_context);
   Status PrefetchIndexAndFilterBlocks(
-      FilePrefetchBuffer* prefetch_buffer, InternalIterator* meta_iter,
-      BlockBasedTable* new_table, bool prefetch_all,
-      const BlockBasedTableOptions& table_options, const int level,
-      BlockCacheLookupContext* lookup_context);
+      const ReadOptions& read_options, FilePrefetchBuffer* prefetch_buffer,
+      InternalIterator* meta_iter, BlockBasedTable* new_table,
+      bool prefetch_all, const BlockBasedTableOptions& table_options,
+      const int level, BlockCacheLookupContext* lookup_context);
 
   static BlockType GetBlockTypeForMetaBlockByName(const Slice& meta_block_name);
 
-  Status VerifyChecksumInMetaBlocks(InternalIteratorBase<Slice>* index_iter);
-  Status VerifyChecksumInBlocks(InternalIteratorBase<IndexValue>* index_iter);
+  Status VerifyChecksumInMetaBlocks(const ReadOptions& read_options,
+                                    InternalIteratorBase<Slice>* index_iter);
+  Status VerifyChecksumInBlocks(const ReadOptions& read_options,
+                                InternalIteratorBase<IndexValue>* index_iter);
 
   // Create the filter from the filter block.
   std::unique_ptr<FilterBlockReader> CreateFilterBlockReader(

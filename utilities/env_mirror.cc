@@ -21,16 +21,17 @@ class SequentialFileMirror : public SequentialFile {
   std::string fname;
   explicit SequentialFileMirror(std::string f) : fname(f) {}
 
-  Status Read(size_t n, Slice* result, char* scratch) override {
+  Status Read(size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) override {
     Slice aslice;
-    Status as = a_->Read(n, &aslice, scratch);
+    Status as = a_->Read(n, &aslice, scratch, io_src);
     if (as == Status::OK()) {
       char* bscratch = new char[n];
       Slice bslice;
       size_t off = 0;
       size_t left = aslice.size();
       while (left) {
-        Status bs = b_->Read(left, &bslice, bscratch);
+        Status bs = b_->Read(left, &bslice, bscratch, io_src);
         assert(as == bs);
         assert(memcmp(bscratch, scratch + off, bslice.size()) == 0);
         off += bslice.size();
@@ -39,7 +40,7 @@ class SequentialFileMirror : public SequentialFile {
       delete[] bscratch;
       *result = aslice;
     } else {
-      Status bs = b_->Read(n, result, scratch);
+      Status bs = b_->Read(n, result, scratch, io_src);
       assert(as == bs);
     }
     return as;
@@ -65,16 +66,16 @@ class RandomAccessFileMirror : public RandomAccessFile {
   std::string fname;
   explicit RandomAccessFileMirror(std::string f) : fname(f) {}
 
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
-    Status as = a_->Read(offset, n, result, scratch);
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
+    Status as = a_->Read(offset, n, result, scratch, io_src);
     if (as == Status::OK()) {
       char* bscratch = new char[n];
       Slice bslice;
       size_t off = 0;
       size_t left = result->size();
       while (left) {
-        Status bs = b_->Read(offset + off, left, &bslice, bscratch);
+        Status bs = b_->Read(offset + off, left, &bslice, bscratch, io_src);
         assert(as == bs);
         assert(memcmp(bscratch, scratch + off, bslice.size()) == 0);
         off += bslice.size();
@@ -82,7 +83,7 @@ class RandomAccessFileMirror : public RandomAccessFile {
       }
       delete[] bscratch;
     } else {
-      Status bs = b_->Read(offset, n, result, scratch);
+      Status bs = b_->Read(offset, n, result, scratch, io_src);
       assert(as == bs);
     }
     return as;
@@ -155,6 +156,14 @@ class WritableFileMirror : public WritableFile {
   Env::IOPriority GetIOPriority() override {
     // NOTE: we don't verify this one
     return a_->GetIOPriority();
+  }
+  void SetIOSource(Env::IOSource io_src) override {
+    a_->SetIOSource(io_src);
+    b_->SetIOSource(io_src);
+  }
+  Env::IOSource GetIOSource() override {
+    // NOTE: we don't verify this one
+    return a_->GetIOSource();
   }
   uint64_t GetFileSize() override {
     uint64_t as = a_->GetFileSize();

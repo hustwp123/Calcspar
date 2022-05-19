@@ -17,12 +17,14 @@
 #pragma once
 
 #include <stdint.h>
+
 #include <cstdarg>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <string>
 #include <vector>
+
 #include "rocksdb/status.h"
 #include "rocksdb/thread_status.h"
 
@@ -34,7 +36,7 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define ROCKSDB_PRINTF_FORMAT_ATTR(format_param, dots_param) \
-    __attribute__((__format__(__printf__, format_param, dots_param)))
+  __attribute__((__format__(__printf__, format_param, dots_param)))
 #else
 #define ROCKSDB_PRINTF_FORMAT_ATTR(format_param, dots_param)
 #endif
@@ -364,6 +366,14 @@ class Env {
   // Priority for requesting bytes in rate limiter scheduler
   enum IOPriority { IO_LOW = 0, IO_HIGH = 1, IO_TOTAL = 2 };
 
+  enum IOSource {
+    IO_SRC_PREFETCH = 0,  // from prefetch model
+    IO_SRC_COMPACTION,    // from sstable compaction
+    IO_SRC_FLUSH,         // from memtable flush
+    IO_SRC_USER,          // from user request
+    IO_SRC_DEFAULT        // some unknown source
+  };
+
   // Arrange to run "(*function)(arg)" once in a background thread, in
   // the thread pool specified by pri. By default, jobs go to the 'LOW'
   // priority thread pool.
@@ -553,7 +563,8 @@ class SequentialFile {
   // If an error was encountered, returns a non-OK status.
   //
   // REQUIRES: External synchronization
-  virtual Status Read(size_t n, Slice* result, char* scratch) = 0;
+  virtual Status Read(size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) = 0;
 
   // Skip "n" bytes from the file. This is guaranteed to be no
   // slower that reading the same data, but may be faster.
@@ -582,7 +593,8 @@ class SequentialFile {
   // Positioned Read for direct I/O
   // If Direct I/O enabled, offset, n, and scratch should be properly aligned
   virtual Status PositionedRead(uint64_t /*offset*/, size_t /*n*/,
-                                Slice* /*result*/, char* /*scratch*/) {
+                                Slice* /*result*/, char* /*scratch*/,
+                                Env::IOSource io_src) {
     return Status::NotSupported();
   }
 
@@ -626,11 +638,12 @@ class RandomAccessFile {
   //
   // Safe for concurrent use by multiple threads.
   // If Direct I/O enabled, offset, n, and scratch should be aligned properly.
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const = 0;
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) const = 0;
 
   // Readahead the file starting from offset by n bytes for caching.
-  virtual Status Prefetch(uint64_t /*offset*/, size_t /*n*/) {
+  virtual Status Prefetch(uint64_t /*offset*/, size_t /*n*/,
+                          Env::IOSource io_src) {
     return Status::OK();
   }
 
@@ -641,11 +654,12 @@ class RandomAccessFile {
   // individual requests will be ignored and return status will be assumed
   // for all read requests. The function return status is only meant for any
   // any errors that occur before even processing specific read requests
-  virtual Status MultiRead(ReadRequest* reqs, size_t num_reqs) {
+  virtual Status MultiRead(ReadRequest* reqs, size_t num_reqs,
+                           Env::IOSource io_src) {
     assert(reqs != nullptr);
     for (size_t i = 0; i < num_reqs; ++i) {
       ReadRequest& req = reqs[i];
-      req.status = Read(req.offset, req.len, &req.result, req.scratch);
+      req.status = Read(req.offset, req.len, &req.result, req.scratch, io_src);
     }
     return Status::OK();
   }
@@ -702,6 +716,7 @@ class WritableFile {
       : last_preallocated_block_(0),
         preallocation_block_size_(0),
         io_priority_(Env::IO_TOTAL),
+        io_src_(Env::IO_SRC_DEFAULT),
         write_hint_(Env::WLTH_NOT_SET),
         strict_bytes_per_sync_(false) {}
 
@@ -709,6 +724,7 @@ class WritableFile {
       : last_preallocated_block_(0),
         preallocation_block_size_(0),
         io_priority_(Env::IO_TOTAL),
+        io_src_(Env::IO_SRC_DEFAULT),
         write_hint_(Env::WLTH_NOT_SET),
         strict_bytes_per_sync_(options.strict_bytes_per_sync) {}
 
@@ -779,6 +795,10 @@ class WritableFile {
   virtual void SetIOPriority(Env::IOPriority pri) { io_priority_ = pri; }
 
   virtual Env::IOPriority GetIOPriority() { return io_priority_; }
+
+  virtual void SetIOSource(Env::IOSource io_src) { io_src_ = io_src; }
+
+  virtual Env::IOSource GetIOSource() { return io_src_; }
 
   virtual void SetWriteLifeTimeHint(Env::WriteLifeTimeHint hint) {
     write_hint_ = hint;
@@ -876,6 +896,7 @@ class WritableFile {
 
  protected:
   Env::IOPriority io_priority_;
+  Env::IOSource io_src_;
   Env::WriteLifeTimeHint write_hint_;
   const bool strict_bytes_per_sync_;
 };
@@ -896,13 +917,14 @@ class RandomRWFile {
 
   // Write bytes in `data` at  offset `offset`, Returns Status::OK() on success.
   // Pass aligned buffer when use_direct_io() returns true.
-  virtual Status Write(uint64_t offset, const Slice& data) = 0;
+  virtual Status Write(uint64_t offset, const Slice& data,
+                       Env::IOSource io_src) = 0;
 
   // Read up to `n` bytes starting from offset `offset` and store them in
   // result, provided `scratch` size should be at least `n`.
   // Returns Status::OK() on success.
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const = 0;
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) const = 0;
 
   virtual Status Flush() = 0;
 
@@ -1369,8 +1391,9 @@ class SequentialFileWrapper : public SequentialFile {
  public:
   explicit SequentialFileWrapper(SequentialFile* target) : target_(target) {}
 
-  Status Read(size_t n, Slice* result, char* scratch) override {
-    return target_->Read(n, result, scratch);
+  Status Read(size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) override {
+    return target_->Read(n, result, scratch, io_src);
   }
   Status Skip(uint64_t n) override { return target_->Skip(n); }
   bool use_direct_io() const override { return target_->use_direct_io(); }
@@ -1380,9 +1403,9 @@ class SequentialFileWrapper : public SequentialFile {
   Status InvalidateCache(size_t offset, size_t length) override {
     return target_->InvalidateCache(offset, length);
   }
-  Status PositionedRead(uint64_t offset, size_t n, Slice* result,
-                        char* scratch) override {
-    return target_->PositionedRead(offset, n, result, scratch);
+  Status PositionedRead(uint64_t offset, size_t n, Slice* result, char* scratch,
+                        Env::IOSource io_src) override {
+    return target_->PositionedRead(offset, n, result, scratch, io_src);
   }
 
  private:
@@ -1394,15 +1417,16 @@ class RandomAccessFileWrapper : public RandomAccessFile {
   explicit RandomAccessFileWrapper(RandomAccessFile* target)
       : target_(target) {}
 
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
-    return target_->Read(offset, n, result, scratch);
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
+    return target_->Read(offset, n, result, scratch, io_src);
   }
-  Status MultiRead(ReadRequest* reqs, size_t num_reqs) override {
-    return target_->MultiRead(reqs, num_reqs);
+  Status MultiRead(ReadRequest* reqs, size_t num_reqs,
+                   Env::IOSource io_src) override {
+    return target_->MultiRead(reqs, num_reqs, io_src);
   }
-  Status Prefetch(uint64_t offset, size_t n) override {
-    return target_->Prefetch(offset, n);
+  Status Prefetch(uint64_t offset, size_t n, Env::IOSource io_src) override {
+    return target_->Prefetch(offset, n, io_src);
   }
   size_t GetUniqueId(char* id, size_t max_size) const override {
     return target_->GetUniqueId(id, max_size);
@@ -1446,6 +1470,12 @@ class WritableFileWrapper : public WritableFile {
   }
 
   Env::IOPriority GetIOPriority() override { return target_->GetIOPriority(); }
+
+  void SetIOSource(Env::IOSource io_src) override {
+    target_->SetIOSource(io_src);
+  }
+
+  Env::IOSource GetIOSource() override { return target_->GetIOSource(); }
 
   void SetWriteLifeTimeHint(Env::WriteLifeTimeHint hint) override {
     target_->SetWriteLifeTimeHint(hint);
@@ -1498,12 +1528,13 @@ class RandomRWFileWrapper : public RandomRWFile {
   size_t GetRequiredBufferAlignment() const override {
     return target_->GetRequiredBufferAlignment();
   }
-  Status Write(uint64_t offset, const Slice& data) override {
-    return target_->Write(offset, data);
+  Status Write(uint64_t offset, const Slice& data,
+               Env::IOSource io_src) override {
+    return target_->Write(offset, data, io_src);
   }
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override {
-    return target_->Read(offset, n, result, scratch);
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override {
+    return target_->Read(offset, n, result, scratch, io_src);
   }
   Status Flush() override { return target_->Flush(); }
   Status Sync() override { return target_->Sync(); }

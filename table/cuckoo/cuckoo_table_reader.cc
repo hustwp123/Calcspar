@@ -33,7 +33,7 @@ const uint32_t kInvalidIndex = std::numeric_limits<uint32_t>::max();
 extern const uint64_t kCuckooTableMagicNumber;
 
 CuckooTableReader::CuckooTableReader(
-    const ImmutableCFOptions& ioptions,
+    const ReadOptions& read_options, const ImmutableCFOptions& ioptions,
     std::unique_ptr<RandomAccessFileReader>&& file, uint64_t file_size,
     const Comparator* comparator,
     uint64_t (*get_slice_hash)(const Slice&, uint32_t, uint64_t))
@@ -56,8 +56,9 @@ CuckooTableReader::CuckooTableReader(
     status_ = Status::InvalidArgument("File is not mmaped");
   }
   TableProperties* props = nullptr;
-  status_ = ReadTableProperties(file_.get(), file_size, kCuckooTableMagicNumber,
-      ioptions, &props, true /* compression_type_missing */);
+  status_ = ReadTableProperties(read_options, file_.get(), file_size,
+                                kCuckooTableMagicNumber, ioptions, &props,
+                                true /* compression_type_missing */);
   if (!status_.ok()) {
     return;
   }
@@ -136,7 +137,8 @@ CuckooTableReader::CuckooTableReader(
   cuckoo_block_size_ = *reinterpret_cast<const uint32_t*>(
       cuckoo_block_size->second.data());
   cuckoo_block_bytes_minus_one_ = cuckoo_block_size_ * bucket_length_ - 1;
-  status_ = file_->Read(0, static_cast<size_t>(file_size), &file_data_, nullptr);
+  status_ = file_->Read(0, static_cast<size_t>(file_size), &file_data_, nullptr,
+                        read_options.io_src);
 }
 
 Status CuckooTableReader::Get(const ReadOptions& /*readOptions*/,

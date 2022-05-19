@@ -29,7 +29,8 @@ bool IsFileSectorAligned(const size_t off, size_t sector_size) {
 }
 #endif
 
-Status SequentialFileReader::Read(size_t n, Slice* result, char* scratch) {
+Status SequentialFileReader::Read(size_t n, Slice* result, char* scratch,
+                                  Env::IOSource io_src) {
   Status s;
   if (use_direct_io()) {
 #ifndef ROCKSDB_LITE
@@ -43,7 +44,8 @@ Status SequentialFileReader::Read(size_t n, Slice* result, char* scratch) {
     buf.Alignment(alignment);
     buf.AllocateNewBuffer(size);
     Slice tmp;
-    s = file_->PositionedRead(aligned_offset, size, &tmp, buf.BufferStart());
+    s = file_->PositionedRead(aligned_offset, size, &tmp, buf.BufferStart(),
+                              io_src);
     if (s.ok() && offset_advance < tmp.size()) {
       buf.Size(tmp.size());
       r = buf.Read(scratch, offset_advance,
@@ -52,12 +54,11 @@ Status SequentialFileReader::Read(size_t n, Slice* result, char* scratch) {
     *result = Slice(scratch, r);
 #endif  // !ROCKSDB_LITE
   } else {
-    s = file_->Read(n, result, scratch);
+    s = file_->Read(n, result, scratch, io_src);
   }
   IOSTATS_ADD(bytes_read, result->size());
   return s;
 }
-
 
 Status SequentialFileReader::Skip(uint64_t n) {
 #ifndef ROCKSDB_LITE
@@ -70,7 +71,8 @@ Status SequentialFileReader::Skip(uint64_t n) {
 }
 
 Status RandomAccessFileReader::Read(uint64_t offset, size_t n, Slice* result,
-                                    char* scratch, bool for_compaction) const {
+                                    char* scratch, Env::IOSource io_src,
+                                    bool for_compaction) const {
   Status s;
   uint64_t elapsed = 0;
   {
@@ -109,7 +111,7 @@ Status RandomAccessFileReader::Read(uint64_t offset, size_t n, Slice* result,
         {
           IOSTATS_CPU_TIMER_GUARD(cpu_read_nanos, env_);
           s = file_->Read(aligned_offset + buf.CurrentSize(), allowed, &tmp,
-                          buf.Destination());
+                          buf.Destination(), io_src);
         }
         if (ShouldNotifyListeners()) {
           auto finish_ts = std::chrono::system_clock::now();
@@ -157,7 +159,8 @@ Status RandomAccessFileReader::Read(uint64_t offset, size_t n, Slice* result,
 #endif
         {
           IOSTATS_CPU_TIMER_GUARD(cpu_read_nanos, env_);
-          s = file_->Read(offset + pos, allowed, &tmp_result, scratch + pos);
+          s = file_->Read(offset + pos, allowed, &tmp_result, scratch + pos,
+                          io_src);
         }
 #ifndef ROCKSDB_LITE
         if (ShouldNotifyListeners()) {
@@ -193,7 +196,8 @@ Status RandomAccessFileReader::Read(uint64_t offset, size_t n, Slice* result,
 }
 
 Status RandomAccessFileReader::MultiRead(ReadRequest* read_reqs,
-                                         size_t num_reqs) const {
+                                         size_t num_reqs,
+                                         Env::IOSource io_src) const {
   Status s;
   uint64_t elapsed = 0;
   assert(!use_direct_io());
@@ -212,7 +216,7 @@ Status RandomAccessFileReader::MultiRead(ReadRequest* read_reqs,
 #endif // ROCKSDB_LITE
       {
         IOSTATS_CPU_TIMER_GUARD(cpu_read_nanos, env_);
-        s = file_->MultiRead(read_reqs, num_reqs);
+        s = file_->MultiRead(read_reqs, num_reqs, io_src);
       }
       for (size_t i = 0; i < num_reqs; ++i) {
 #ifndef ROCKSDB_LITE
@@ -637,11 +641,11 @@ class ReadaheadRandomAccessFile : public RandomAccessFile {
 
  ReadaheadRandomAccessFile& operator=(const ReadaheadRandomAccessFile&) = delete;
 
- Status Read(uint64_t offset, size_t n, Slice* result,
-             char* scratch) const override {
+ Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+             Env::IOSource io_src) const override {
    // Read-ahead only make sense if we have some slack left after reading
    if (n + alignment_ >= readahead_size_) {
-     return file_->Read(offset, n, result, scratch);
+     return file_->Read(offset, n, result, scratch, io_src);
    }
 
    std::unique_lock<std::mutex> lk(lock_);
@@ -651,7 +655,7 @@ class ReadaheadRandomAccessFile : public RandomAccessFile {
    // completely or partially in the buffer.
    // If it's completely cached, including end of file case when offset + n is
    // greater than EOF, then return.
-   if (TryReadFromCache(offset, n, &cached_len, scratch) &&
+   if (TryReadFromCache(offset, n, &cached_len, scratch, io_src) &&
        (cached_len == n || buffer_.CurrentSize() < readahead_size_)) {
      // We read exactly what we needed, or we hit end of file - return.
      *result = Slice(scratch, cached_len);
@@ -662,18 +666,18 @@ class ReadaheadRandomAccessFile : public RandomAccessFile {
    // chunk_offset equals to advanced_offset
    size_t chunk_offset = TruncateToPageBoundary(alignment_, advanced_offset);
 
-   Status s = ReadIntoBuffer(chunk_offset, readahead_size_);
+   Status s = ReadIntoBuffer(chunk_offset, readahead_size_, io_src);
    if (s.ok()) {
      // The data we need is now in cache, so we can safely read it
      size_t remaining_len;
      TryReadFromCache(advanced_offset, n - cached_len, &remaining_len,
-                      scratch + cached_len);
+                      scratch + cached_len, io_src);
      *result = Slice(scratch, cached_len + remaining_len);
    }
    return s;
  }
 
- Status Prefetch(uint64_t offset, size_t n) override {
+ Status Prefetch(uint64_t offset, size_t n, Env::IOSource io_src) override {
    if (n < readahead_size_) {
      // Don't allow smaller prefetches than the configured `readahead_size_`.
      // `Read()` assumes a smaller prefetch buffer indicates EOF was reached.
@@ -688,7 +692,8 @@ class ReadaheadRandomAccessFile : public RandomAccessFile {
      return Status::OK();
    }
    return ReadIntoBuffer(prefetch_offset,
-                         Roundup(offset_ + n, alignment_) - prefetch_offset);
+                         Roundup(offset_ + n, alignment_) - prefetch_offset,
+                         io_src);
  }
 
  size_t GetUniqueId(char* id, size_t max_size) const override {
@@ -711,7 +716,7 @@ private:
  // copies these number of bytes to scratch and returns true.
  // If nothing was read sets cached_len to 0 and returns false.
  bool TryReadFromCache(uint64_t offset, size_t n, size_t* cached_len,
-                       char* scratch) const {
+                       char* scratch, Env::IOSource io_src) const {
    if (offset < buffer_offset_ ||
        offset >= buffer_offset_ + buffer_.CurrentSize()) {
      *cached_len = 0;
@@ -722,26 +727,26 @@ private:
        buffer_.CurrentSize() - static_cast<size_t>(offset_in_buffer), n);
    memcpy(scratch, buffer_.BufferStart() + offset_in_buffer, *cached_len);
    return true;
-  }
+ }
 
   // Reads into buffer_ the next n bytes from file_ starting at offset.
   // Can actually read less if EOF was reached.
   // Returns the status of the read operastion on the file.
-  Status ReadIntoBuffer(uint64_t offset, size_t n) const {
-    if (n > buffer_.Capacity()) {
-      n = buffer_.Capacity();
-    }
-    assert(IsFileSectorAligned(offset, alignment_));
-    assert(IsFileSectorAligned(n, alignment_));
-    Slice result;
-    Status s = file_->Read(offset, n, &result, buffer_.BufferStart());
-    if (s.ok()) {
-      buffer_offset_ = offset;
-      buffer_.Size(result.size());
-      assert(result.size() == 0 || buffer_.BufferStart() == result.data());
-    }
-    return s;
-  }
+ Status ReadIntoBuffer(uint64_t offset, size_t n, Env::IOSource io_src) const {
+   if (n > buffer_.Capacity()) {
+     n = buffer_.Capacity();
+   }
+   assert(IsFileSectorAligned(offset, alignment_));
+   assert(IsFileSectorAligned(n, alignment_));
+   Slice result;
+   Status s = file_->Read(offset, n, &result, buffer_.BufferStart(), io_src);
+   if (s.ok()) {
+     buffer_offset_ = offset;
+     buffer_.Size(result.size());
+     assert(result.size() == 0 || buffer_.BufferStart() == result.data());
+   }
+   return s;
+ }
 
   const std::unique_ptr<RandomAccessFile> file_;
   const size_t alignment_;
@@ -776,7 +781,8 @@ class ReadaheadSequentialFile : public SequentialFile {
 
   ReadaheadSequentialFile& operator=(const ReadaheadSequentialFile&) = delete;
 
-  Status Read(size_t n, Slice* result, char* scratch) override {
+  Status Read(size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) override {
     std::unique_lock<std::mutex> lk(lock_);
 
     size_t cached_len = 0;
@@ -795,7 +801,7 @@ class ReadaheadSequentialFile : public SequentialFile {
     Status s;
     // Read-ahead only make sense if we have some slack left after reading
     if (n + alignment_ >= readahead_size_) {
-      s = file_->Read(n, result, scratch + cached_len);
+      s = file_->Read(n, result, scratch + cached_len, io_src);
       if (s.ok()) {
         read_offset_ += result->size();
         *result = Slice(scratch, cached_len + result->size());
@@ -804,7 +810,7 @@ class ReadaheadSequentialFile : public SequentialFile {
       return s;
     }
 
-    s = ReadIntoBuffer(readahead_size_);
+    s = ReadIntoBuffer(readahead_size_, io_src);
     if (s.ok()) {
       // The data we need is now in cache, so we can safely read it
       size_t remaining_len;
@@ -841,9 +847,9 @@ class ReadaheadSequentialFile : public SequentialFile {
     return s;
   }
 
-  Status PositionedRead(uint64_t offset, size_t n, Slice* result,
-                        char* scratch) override {
-    return file_->PositionedRead(offset, n, result, scratch);
+  Status PositionedRead(uint64_t offset, size_t n, Slice* result, char* scratch,
+                        Env::IOSource io_src) override {
+    return file_->PositionedRead(offset, n, result, scratch, io_src);
   }
 
   Status InvalidateCache(size_t offset, size_t length) override {
@@ -876,13 +882,13 @@ class ReadaheadSequentialFile : public SequentialFile {
   // Reads into buffer_ the next n bytes from file_.
   // Can actually read less if EOF was reached.
   // Returns the status of the read operastion on the file.
-  Status ReadIntoBuffer(size_t n) {
+  Status ReadIntoBuffer(size_t n, Env::IOSource io_src) {
     if (n > buffer_.Capacity()) {
       n = buffer_.Capacity();
     }
     assert(IsFileSectorAligned(n, alignment_));
     Slice result;
-    Status s = file_->Read(n, &result, buffer_.BufferStart());
+    Status s = file_->Read(n, &result, buffer_.BufferStart(), io_src);
     if (s.ok()) {
       buffer_offset_ = read_offset_;
       buffer_.Size(result.size());
@@ -912,7 +918,7 @@ class ReadaheadSequentialFile : public SequentialFile {
 
 Status FilePrefetchBuffer::Prefetch(RandomAccessFileReader* reader,
                                     uint64_t offset, size_t n,
-                                    bool for_compaction) {
+                                    Env::IOSource io_src, bool for_compaction) {
   size_t alignment = reader->file()->GetRequiredBufferAlignment();
   size_t offset_ = static_cast<size_t>(offset);
   uint64_t rounddown_offset = Rounddown(offset_, alignment);
@@ -972,7 +978,7 @@ Status FilePrefetchBuffer::Prefetch(RandomAccessFileReader* reader,
   Slice result;
   s = reader->Read(rounddown_offset + chunk_len,
                    static_cast<size_t>(roundup_len - chunk_len), &result,
-                   buffer_.BufferStart() + chunk_len, for_compaction);
+                   buffer_.BufferStart() + chunk_len, io_src, for_compaction);
   if (s.ok()) {
     buffer_offset_ = rounddown_offset;
     buffer_.Size(static_cast<size_t>(chunk_len) + result.size());
@@ -981,7 +987,8 @@ Status FilePrefetchBuffer::Prefetch(RandomAccessFileReader* reader,
 }
 
 bool FilePrefetchBuffer::TryReadFromCache(uint64_t offset, size_t n,
-                                          Slice* result, bool for_compaction) {
+                                          Slice* result, Env::IOSource io_src,
+                                          bool for_compaction) {
   if (track_min_offset_ && offset < min_offset_read_) {
     min_offset_read_ = static_cast<size_t>(offset);
   }
@@ -999,9 +1006,11 @@ bool FilePrefetchBuffer::TryReadFromCache(uint64_t offset, size_t n,
       assert(max_readahead_size_ >= readahead_size_);
       Status s;
       if (for_compaction) {
-        s = Prefetch(file_reader_, offset, std::max(n, readahead_size_), for_compaction);
+        s = Prefetch(file_reader_, offset, std::max(n, readahead_size_), io_src,
+                     for_compaction);
       } else {
-        s = Prefetch(file_reader_, offset, n + readahead_size_, for_compaction);
+        s = Prefetch(file_reader_, offset, n + readahead_size_, io_src,
+                     for_compaction);
       }
       if (!s.ok()) {
         return false;
@@ -1046,7 +1055,8 @@ Status NewWritableFile(Env* env, const std::string& fname,
 }
 
 bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
-                 std::string* output, bool* has_data, Status* result) {
+                 std::string* output, bool* has_data, Status* result,
+                 Env::IOSource io_src) {
   const int kBufferSize = 8192;
   char buffer[kBufferSize + 1];
   Slice input_slice;
@@ -1063,7 +1073,7 @@ bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
       // if we're not sure whether we have a complete line,
       // further read from the file.
       if (*has_data) {
-        *result = seq_file->Read(kBufferSize, &input_slice, buffer);
+        *result = seq_file->Read(kBufferSize, &input_slice, buffer, io_src);
       }
       if (input_slice.size() == 0) {
         // meaning we have read all the data

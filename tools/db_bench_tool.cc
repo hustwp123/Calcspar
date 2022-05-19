@@ -1268,9 +1268,10 @@ class ReportFileOpEnv : public EnvWrapper {
                    ReportFileOpCounters* counters)
           : target_(std::move(target)), counters_(counters) {}
 
-      Status Read(size_t n, Slice* result, char* scratch) override {
+      Status Read(size_t n, Slice* result, char* scratch,
+                  Env::IOSource io_src) override {
         counters_->read_counter_.fetch_add(1, std::memory_order_relaxed);
-        Status rv = target_->Read(n, result, scratch);
+        Status rv = target_->Read(n, result, scratch, io_src);
         counters_->bytes_read_.fetch_add(result->size(),
                                          std::memory_order_relaxed);
         return rv;
@@ -1300,9 +1301,9 @@ class ReportFileOpEnv : public EnvWrapper {
                    ReportFileOpCounters* counters)
           : target_(std::move(target)), counters_(counters) {}
       Status Read(uint64_t offset, size_t n, Slice* result,
-                  char* scratch) const override {
+                  char* scratch, Env::IOSource io_src) const override {
         counters_->read_counter_.fetch_add(1, std::memory_order_relaxed);
-        Status rv = target_->Read(offset, n, result, scratch);
+        Status rv = target_->Read(offset, n, result, scratch, io_src);
         counters_->bytes_read_.fetch_add(result->size(),
                                          std::memory_order_relaxed);
         return rv;

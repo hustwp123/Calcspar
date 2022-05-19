@@ -68,9 +68,10 @@ class PosixSequentialFile : public SequentialFile {
                       const EnvOptions& options);
   virtual ~PosixSequentialFile();
 
-  virtual Status Read(size_t n, Slice* result, char* scratch) override;
+  virtual Status Read(size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) override;
   virtual Status PositionedRead(uint64_t offset, size_t n, Slice* result,
-                                char* scratch) override;
+                                char* scratch, Env::IOSource io_src) override;
   virtual Status Skip(uint64_t n) override;
   virtual Status InvalidateCache(size_t offset, size_t length) override;
   virtual bool use_direct_io() const override { return use_direct_io_; }
@@ -91,10 +92,11 @@ class PosixRandomAccessFile : public RandomAccessFile {
                         const EnvOptions& options);
   virtual ~PosixRandomAccessFile();
 
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const override;
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) const override;
 
-  virtual Status Prefetch(uint64_t offset, size_t n) override;
+  virtual Status Prefetch(uint64_t offset, size_t n,
+                          Env::IOSource io_src) override;
 
 #if defined(OS_LINUX) || defined(OS_MACOSX) || defined(OS_AIX)
   virtual size_t GetUniqueId(char* id, size_t max_size) const override;
@@ -167,8 +169,8 @@ class PosixMmapReadableFile : public RandomAccessFile {
   PosixMmapReadableFile(const int fd, const std::string& fname, void* base,
                         size_t length, const EnvOptions& options);
   virtual ~PosixMmapReadableFile();
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const override;
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) const override;
   virtual Status InvalidateCache(size_t offset, size_t length) override;
 };
 
@@ -227,10 +229,11 @@ class PosixRandomRWFile : public RandomRWFile {
                              const EnvOptions& options);
   virtual ~PosixRandomRWFile();
 
-  virtual Status Write(uint64_t offset, const Slice& data) override;
+  virtual Status Write(uint64_t offset, const Slice& data,
+                       Env::IOSource io_src) override;
 
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-                      char* scratch) const override;
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource io_src) const override;
 
   virtual Status Flush() override;
   virtual Status Sync() override;

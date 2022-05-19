@@ -81,16 +81,18 @@ class SstFileWriter {
   // file. To use the rate limiter an io_priority smaller than IO_TOTAL can be
   // passed.
   SstFileWriter(const EnvOptions& env_options, const Options& options,
+                Env::IOSource io_src,
                 ColumnFamilyHandle* column_family = nullptr,
                 bool invalidate_page_cache = true,
                 Env::IOPriority io_priority = Env::IOPriority::IO_TOTAL,
                 bool skip_filters = false)
-      : SstFileWriter(env_options, options, options.comparator, column_family,
-                      invalidate_page_cache, io_priority, skip_filters) {}
+      : SstFileWriter(env_options, options, io_src, options.comparator,
+                      column_family, invalidate_page_cache, io_priority,
+                      skip_filters) {}
 
   // Deprecated API
   SstFileWriter(const EnvOptions& env_options, const Options& options,
-                const Comparator* user_comparator,
+                Env::IOSource io_src, const Comparator* user_comparator,
                 ColumnFamilyHandle* column_family = nullptr,
                 bool invalidate_page_cache = true,
                 Env::IOPriority io_priority = Env::IOPriority::IO_TOTAL,

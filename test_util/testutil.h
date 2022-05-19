@@ -248,7 +248,8 @@ class RandomRWStringSink : public RandomRWFile {
  public:
   explicit RandomRWStringSink(StringSink* ss) : ss_(ss) {}
 
-  Status Write(uint64_t offset, const Slice& data) override {
+  Status Write(uint64_t offset, const Slice& data,
+               Env::IOSource /*io_src*/) override {
     if (offset + data.size() > ss_->contents_.size()) {
       ss_->contents_.resize(static_cast<size_t>(offset) + data.size(), '\0');
     }
@@ -258,8 +259,8 @@ class RandomRWStringSink : public RandomRWFile {
     return Status::OK();
   }
 
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* /*scratch*/) const override {
+  Status Read(uint64_t offset, size_t n, Slice* result, char* /*scratch*/,
+              Env::IOSource /*io_src*/) const override {
     *result = Slice(nullptr, 0);
     if (offset < ss_->contents_.size()) {
       size_t str_res_sz =
@@ -337,8 +338,8 @@ class StringSource: public RandomAccessFile {
 
   uint64_t Size() const { return contents_.size(); }
 
-  virtual Status Read(uint64_t offset, size_t n, Slice* result,
-      char* scratch) const override {
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+                      Env::IOSource /*io_src*/) const override {
     total_reads_++;
     if (offset > contents_.size()) {
       return Status::InvalidArgument("invalid Read offset");
@@ -497,7 +498,8 @@ inline std::string EncodeInt(uint64_t x) {
     explicit SeqStringSource(const std::string& data)
         : data_(data), offset_(0) {}
     ~SeqStringSource() override {}
-    Status Read(size_t n, Slice* result, char* scratch) override {
+    Status Read(size_t n, Slice* result, char* scratch,
+                Env::IOSource /*io_src*/) override {
       std::string output;
       if (offset_ < data_.size()) {
         n = std::min(data_.size() - offset_, n);

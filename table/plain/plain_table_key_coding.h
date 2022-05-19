@@ -86,27 +86,29 @@ class PlainTableFileReader {
   // the buffer, we replace the second buffer with the location user reads.
   //
   // If return false, status code is stored in status_.
-  bool Read(uint32_t file_offset, uint32_t len, Slice* out) {
+  bool Read(uint32_t file_offset, uint32_t len, Slice* out,
+            Env::IOSource io_src) {
     if (file_info_->is_mmap_mode) {
       assert(file_offset + len <= file_info_->data_end_offset);
       *out = Slice(file_info_->file_data.data() + file_offset, len);
       return true;
     } else {
-      return ReadNonMmap(file_offset, len, out);
+      return ReadNonMmap(file_offset, len, out, io_src);
     }
   }
 
   // If return false, status code is stored in status_.
-  bool ReadNonMmap(uint32_t file_offset, uint32_t len, Slice* output);
+  bool ReadNonMmap(uint32_t file_offset, uint32_t len, Slice* output,
+                   Env::IOSource io_src);
 
   // *bytes_read = 0 means eof. false means failure and status is saved
   // in status_. Not directly returning Status to save copying status
   // object to map previous performance of mmap mode.
   inline bool ReadVarint32(uint32_t offset, uint32_t* output,
-                           uint32_t* bytes_read);
+                           uint32_t* bytes_read, Env::IOSource io_src);
 
   bool ReadVarint32NonMmap(uint32_t offset, uint32_t* output,
-                           uint32_t* bytes_read);
+                           uint32_t* bytes_read, Env::IOSource io_src);
 
   Status status() const { return status_; }
 
@@ -154,13 +156,13 @@ class PlainTableKeyDecoder {
   // bytes_read: how many bytes read from start. Output
   // seekable: whether key can be read from this place. Used when building
   //           indexes. Output.
-  Status NextKey(uint32_t start_offset, ParsedInternalKey* parsed_key,
-                 Slice* internal_key, Slice* value, uint32_t* bytes_read,
-                 bool* seekable = nullptr);
+  Status NextKey(const ReadOptions& read_options, uint32_t start_offset,
+                 ParsedInternalKey* parsed_key, Slice* internal_key,
+                 Slice* value, uint32_t* bytes_read, bool* seekable = nullptr);
 
-  Status NextKeyNoValue(uint32_t start_offset, ParsedInternalKey* parsed_key,
-                        Slice* internal_key, uint32_t* bytes_read,
-                        bool* seekable = nullptr);
+  Status NextKeyNoValue(const ReadOptions& read_options, uint32_t start_offset,
+                        ParsedInternalKey* parsed_key, Slice* internal_key,
+                        uint32_t* bytes_read, bool* seekable = nullptr);
 
   PlainTableFileReader file_reader_;
   EncodingType encoding_type_;
@@ -172,18 +174,22 @@ class PlainTableKeyDecoder {
   bool in_prefix_;
 
  private:
-  Status NextPlainEncodingKey(uint32_t start_offset,
+  Status NextPlainEncodingKey(const ReadOptions& read_options,
+                              uint32_t start_offset,
                               ParsedInternalKey* parsed_key,
                               Slice* internal_key, uint32_t* bytes_read,
                               bool* seekable = nullptr);
-  Status NextPrefixEncodingKey(uint32_t start_offset,
+  Status NextPrefixEncodingKey(const ReadOptions& read_options,
+                               uint32_t start_offset,
                                ParsedInternalKey* parsed_key,
                                Slice* internal_key, uint32_t* bytes_read,
                                bool* seekable = nullptr);
-  Status ReadInternalKey(uint32_t file_offset, uint32_t user_key_size,
-                         ParsedInternalKey* parsed_key, uint32_t* bytes_read,
-                         bool* internal_key_valid, Slice* internal_key);
-  inline Status DecodeSize(uint32_t start_offset,
+  Status ReadInternalKey(const ReadOptions& read_options, uint32_t file_offset,
+                         uint32_t user_key_size, ParsedInternalKey* parsed_key,
+                         uint32_t* bytes_read, bool* internal_key_valid,
+                         Slice* internal_key);
+  inline Status DecodeSize(const ReadOptions& read_options,
+                           uint32_t start_offset,
                            PlainTableEntryType* entry_type, uint32_t* key_size,
                            uint32_t* bytes_read);
 };

@@ -7,6 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+#include "util/token_limiter.h"
 #ifdef ROCKSDB_LIB_IO_POSIX
 #include "env/io_posix.h"
 #include <errno.h>
@@ -62,7 +63,7 @@ namespace {
 // cutting the buffer in 1GB chunks. We use this chunk size to be sure to keep
 // the writes aligned.
 
-bool PosixWrite(int fd, const char* buf, size_t nbyte) {
+bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
   const size_t kLimit1Gb = 1UL << 30;
 
   const char* src = buf;
@@ -70,7 +71,7 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte) {
 
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
     ssize_t done = write(fd, src, bytes_to_write);
     if (done < 0) {
       if (errno == EINTR) {
@@ -84,7 +85,8 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte) {
   return true;
 }
 
-bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset) {
+bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
+                          Env::IOSource io_src) {
   const size_t kLimit1Gb = 1UL << 30;
 
   const char* src = buf;
@@ -92,7 +94,7 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset) {
 
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
     if (done < 0) {
       if (errno == EINTR) {
@@ -262,11 +264,13 @@ PosixSequentialFile::~PosixSequentialFile() {
   }
 }
 
-Status PosixSequentialFile::Read(size_t n, Slice* result, char* scratch) {
+Status PosixSequentialFile::Read(size_t n, Slice* result, char* scratch,
+                                 Env::IOSource io_src) {
   assert(result != nullptr && !use_direct_io());
   Status s;
   size_t r = 0;
   do {
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     r = fread_unlocked(scratch, 1, n, file_);
   } while (r == 0 && ferror(file_) && errno == EINTR);
   *result = Slice(scratch, r);
@@ -285,7 +289,8 @@ Status PosixSequentialFile::Read(size_t n, Slice* result, char* scratch) {
 }
 
 Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
-                                           Slice* result, char* scratch) {
+                                           Slice* result, char* scratch,
+                                           Env::IOSource io_src) {
   assert(use_direct_io());
   assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
   assert(IsSectorAligned(n, GetRequiredBufferAlignment()));
@@ -296,6 +301,7 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
@@ -419,7 +425,7 @@ PosixRandomAccessFile::PosixRandomAccessFile(const std::string& fname, int fd,
 PosixRandomAccessFile::~PosixRandomAccessFile() { close(fd_); }
 
 Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
-                                   char* scratch) const {
+                                   char* scratch, Env::IOSource io_src) const {
   if (use_direct_io()) {
     assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(n, GetRequiredBufferAlignment()));
@@ -430,6 +436,7 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
@@ -457,9 +464,12 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
   return s;
 }
 
-Status PosixRandomAccessFile::Prefetch(uint64_t offset, size_t n) {
+Status PosixRandomAccessFile::Prefetch(uint64_t offset, size_t n,
+                                       Env::IOSource io_src) {
   Status s;
+  // ?(wnj) we use direct io only?
   if (!use_direct_io()) {
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     ssize_t r = 0;
 #ifdef OS_LINUX
     r = readahead(fd_, offset, n);
@@ -560,7 +570,8 @@ PosixMmapReadableFile::~PosixMmapReadableFile() {
 }
 
 Status PosixMmapReadableFile::Read(uint64_t offset, size_t n, Slice* result,
-                                   char* /*scratch*/) const {
+                                   char* /*scratch*/,
+                                   Env::IOSource /*io_src*/) const {
   Status s;
   if (offset > length_) {
     *result = Slice();
@@ -859,7 +870,7 @@ Status PosixWritableFile::Append(const Slice& data) {
   const char* src = data.data();
   size_t nbytes = data.size();
 
-  if (!PosixWrite(fd_, src, nbytes)) {
+  if (!PosixWrite(fd_, src, nbytes, io_src_)) {
     return IOError("While appending to file", filename_, errno);
   }
 
@@ -876,7 +887,8 @@ Status PosixWritableFile::PositionedAppend(const Slice& data, uint64_t offset) {
   assert(offset <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()));
   const char* src = data.data();
   size_t nbytes = data.size();
-  if (!PosixPositionedWrite(fd_, src, nbytes, static_cast<off_t>(offset))) {
+  if (!PosixPositionedWrite(fd_, src, nbytes, static_cast<off_t>(offset),
+                            io_src_)) {
     return IOError("While pwrite to file at offset " + ToString(offset),
                    filename_, errno);
   }
@@ -1076,10 +1088,12 @@ PosixRandomRWFile::~PosixRandomRWFile() {
   }
 }
 
-Status PosixRandomRWFile::Write(uint64_t offset, const Slice& data) {
+Status PosixRandomRWFile::Write(uint64_t offset, const Slice& data,
+                                Env::IOSource io_src) {
   const char* src = data.data();
   size_t nbytes = data.size();
-  if (!PosixPositionedWrite(fd_, src, nbytes, static_cast<off_t>(offset))) {
+  if (!PosixPositionedWrite(fd_, src, nbytes, static_cast<off_t>(offset),
+                            io_src)) {
     return IOError(
         "While write random read/write file at offset " + ToString(offset),
         filename_, errno);
@@ -1089,10 +1103,11 @@ Status PosixRandomRWFile::Write(uint64_t offset, const Slice& data) {
 }
 
 Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
-                               char* scratch) const {
+                               char* scratch, Env::IOSource io_src) const {
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     ssize_t done = pread(fd_, ptr, left, offset);
     if (done < 0) {
       // error while reading from file

@@ -79,10 +79,11 @@ Status BuildTable(
     SnapshotChecker* snapshot_checker, const CompressionType compression,
     uint64_t sample_for_compression, const CompressionOptions& compression_opts,
     bool paranoid_file_checks, InternalStats* internal_stats,
-    TableFileCreationReason reason, EventLogger* event_logger, int job_id,
-    const Env::IOPriority io_priority, TableProperties* table_properties,
-    int level, const uint64_t creation_time, const uint64_t oldest_key_time,
-    Env::WriteLifeTimeHint write_hint, const uint64_t file_creation_time) {
+    TableFileCreationReason reason, const Env::IOSource io_src,
+    EventLogger* event_logger, int job_id, const Env::IOPriority io_priority,
+    TableProperties* table_properties, int level, const uint64_t creation_time,
+    const uint64_t oldest_key_time, Env::WriteLifeTimeHint write_hint,
+    const uint64_t file_creation_time) {
   assert((column_family_id ==
           TablePropertiesCollectorFactory::Context::kUnknownColumnFamily) ==
          column_family_name.empty());
@@ -127,6 +128,7 @@ Status BuildTable(
         return s;
       }
       file->SetIOPriority(io_priority);
+      file->SetIOSource(io_src);
       file->SetWriteLifeTimeHint(write_hint);
 
       file_writer.reset(
@@ -215,6 +217,7 @@ Status BuildTable(
       // No matter whether use_direct_io_for_flush_and_compaction is true,
       // we will regrad this verification as user reads since the goal is
       // to cache it here for further user reads
+      // TODO(wnj): change ReadOptions here with io_src
       std::unique_ptr<InternalIterator> it(table_cache->NewIterator(
           ReadOptions(), env_options, internal_comparator, *meta,
           nullptr /* range_del_agg */,

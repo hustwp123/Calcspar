@@ -20,6 +20,7 @@
 // NOTE that if FLAGS_test_batches_snapshots is set, the test will have
 // different behavior. See comment of the flag for details.
 
+#include "rocksdb/options.h"
 #ifndef GFLAGS
 #include <cstdio>
 int main() {
@@ -3537,7 +3538,7 @@ class NonBatchedOpsStressTest : public StressTest {
       s = FLAGS_env->DeleteFile(sst_filename);
     }
 
-    SstFileWriter sst_file_writer(EnvOptions(), options_);
+    SstFileWriter sst_file_writer(EnvOptions(), options_, Env::IO_SRC_DEFAULT);
     if (s.ok()) {
       s = sst_file_writer.Open(sst_filename);
     }
