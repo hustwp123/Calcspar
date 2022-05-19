@@ -90,9 +90,10 @@ class TestRandomRWFile : public RandomRWFile {
                             std::unique_ptr<RandomRWFile>&& f,
                             FaultInjectionTestEnv* env);
   virtual ~TestRandomRWFile();
-  Status Write(uint64_t offset, const Slice& data) override;
-  Status Read(uint64_t offset, size_t n, Slice* result,
-              char* scratch) const override;
+  Status Write(uint64_t offset, const Slice& data,
+               Env::IOSource io_src) override;
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch,
+              Env::IOSource io_src) const override;
   Status Close() override;
   Status Flush() override;
   Status Sync() override;
