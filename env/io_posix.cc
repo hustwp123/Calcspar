@@ -8,6 +8,7 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "util/token_limiter.h"
+#include "prefetcher/prefetcher.h"
 #ifdef ROCKSDB_LIB_IO_POSIX
 #include "env/io_posix.h"
 #include <errno.h>
@@ -426,12 +427,22 @@ PosixRandomAccessFile::~PosixRandomAccessFile() { close(fd_); }
 
 Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
                                    char* scratch, Env::IOSource io_src) const {
+  uint64_t sst_id=TableFileNameToNumber(filename_);
+  Prefetcher::SstRead(sst_id,offset,n,true);
   if (use_direct_io()) {
     assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(n, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(scratch, GetRequiredBufferAlignment()));
   }
   Status s;
+  size_t myleft=Prefetcher::TryGetFromPrefetcher(sst_id,offset,n,scratch);
+  if(myleft!=n+1)
+  {
+    // fprintf(stderr,"read from cache\n");
+    *result = Slice(scratch,  n - myleft);
+    return s;
+  }
+  
   ssize_t r = -1;
   size_t left = n;
   char* ptr = scratch;
