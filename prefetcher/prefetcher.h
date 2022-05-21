@@ -128,6 +128,7 @@ class Prefetcher {
   void _SstRead(uint64_t sst_id, uint64_t offset, size_t size, bool isGp2);
   static void CaluateSstHeat();
   void _CaluateSstHeat();
+  static void Prefetche();
   void _Prefetcher();
 
   static size_t TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset, size_t n,

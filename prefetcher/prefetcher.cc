@@ -1,4 +1,5 @@
 #include "prefetcher/prefetcher.h"
+#include "util/token_limiter.h"
 
 namespace rocksdb {
 
@@ -14,6 +15,19 @@ void caluateSstHeatThread()  //统计sst热度线程
     sleep(1);
     Prefetcher::CaluateSstHeat();
   }
+}
+
+void prefetchThread()  //统计sst热度线程
+{
+  while (1) {
+    // sleep(1);
+    Prefetcher::Prefetche();
+  }
+}
+
+void Prefetcher::Prefetche() {
+  static Prefetcher &i = _GetInst();
+  i._Prefetcher();
 }
 
 void Prefetcher::CaluateSstHeat() {
@@ -79,6 +93,7 @@ void Prefetcher::_Prefetcher() {
   }
   char buf[256 * 1024];
   uint64_t offset = blk_num * 256 * 1024;
+  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH, TokenLimiter::kRead);
   int ret = pread(readfd, buf, 256 * 1024, offset);
   if (ret == -1) {
     fprintf(stderr, "pread error\n");
@@ -129,9 +144,9 @@ void Prefetcher::_CaluateSstHeat() {
       cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second * 0.8);
     }
   }
-  if (doPrefetch) {
-    _Prefetcher();
-  }
+  // if (doPrefetch) {
+  //   _Prefetcher();
+  // }
 }
 
 size_t Prefetcher::TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
@@ -286,6 +301,9 @@ void Prefetcher::_Init() {
   inited = true;
   std::thread t(caluateSstHeatThread);
   t.detach();
+
+  std::thread t2(prefetchThread);
+  t2.detach();
 }
 
 int64_t Prefetcher::now() {

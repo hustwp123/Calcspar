@@ -3386,6 +3386,11 @@ class Benchmark {
 
     assert(db_.db == nullptr);
 
+    options.db_paths={
+       {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+      {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
+      }; 
+
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
       options.write_buffer_manager.reset(
