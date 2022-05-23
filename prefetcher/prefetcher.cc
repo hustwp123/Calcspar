@@ -64,7 +64,7 @@ void Prefetcher::_Prefetcher() {
   uint64_t fromSstId = fromKey / 10000;
   uint64_t blk_num = fromKey % 10000;
   if (fromSstId == 0) {
-    fprintf(stderr, "err sstid==0 key==%lu gettimes= %lu\n", fromKey,
+    fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
             cloudManager.sstMap[fromKey]->get_times);
     lock_.Lock();
     // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
@@ -313,11 +313,11 @@ void Prefetcher::_Init() {
   inited = true;
 
   int ret;
-ret = posix_memalign((void **)&buf_, 4 * 1024, 256 * 1024);
-if (ret) {
-  fprintf(stderr, "posix_memalign failed");
-  exit(1);
-}
+  ret = posix_memalign((void **)&buf_, 4 * 1024, 256 * 1024);
+  if (ret) {
+    fprintf(stderr, "posix_memalign failed");
+    exit(1);
+  }
 
   std::thread t(caluateSstHeatThread);
   t.detach();

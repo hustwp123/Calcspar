@@ -1467,7 +1467,9 @@ Status CompactionJob::OpenCompactionOutputFile(
 
   sub_compact->outputs.push_back(out);
   writable_file->SetIOPriority(Env::IO_LOW);
-  writable_file->SetIOSource(Env::IO_SRC_COMPACTION);
+  writable_file->SetIOSource(sub_compact->compaction->input_levels(0)->num_files
+                                 ? Env::IO_SRC_FLUSH_L0COMP
+                                 : Env::IO_SRC_COMPACTION);
   writable_file->SetWriteLifeTimeHint(write_hint_);
   writable_file->SetPreallocationBlockSize(static_cast<size_t>(
       sub_compact->compaction->OutputFilePreallocationSize()));

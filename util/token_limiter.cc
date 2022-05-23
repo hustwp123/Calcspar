@@ -56,8 +56,8 @@ std::string TokenLimiter::IOSourceToString(Env::IOSource io_src) {
       return "Prefetch";
     case Env::IOSource::IO_SRC_COMPACTION:
       return "Compaction";
-    case Env::IOSource::IO_SRC_FLUSH:
-      return "Flush";
+    case Env::IOSource::IO_SRC_FLUSH_L0COMP:
+      return "FLUSH_L0COMP";
     case Env::IOSource::IO_SRC_USER:
       return "User";
     case Env::IOSource::IO_SRC_DEFAULT:
@@ -73,7 +73,7 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
+      wait_threshold_us_{900 * 1000, 700 * 1000, 0, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),

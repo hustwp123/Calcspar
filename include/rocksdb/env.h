@@ -369,7 +369,7 @@ class Env {
   enum IOSource {
     IO_SRC_PREFETCH = 0,  // from prefetch model
     IO_SRC_COMPACTION,    // from sstable compaction
-    IO_SRC_FLUSH,         // from memtable flush
+    IO_SRC_FLUSH_L0COMP,  // from memtable flush and level 0 compaction
     IO_SRC_USER,          // from user request
     IO_SRC_DEFAULT        // some unknown source
   };
