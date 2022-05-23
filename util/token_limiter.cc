@@ -21,6 +21,11 @@ TokenLimiter* TokenLimiter::GetDefaultInstance() {
 }
 
 void TokenLimiter::SetDefaultInstance(std::unique_ptr<TokenLimiter> limiter) {
+  if(default_limiter != nullptr)
+  {
+    return;
+  }
+  // fprintf(stderr,"default_limiter==null %d limiter==null %d\n",default_limiter == nullptr,limiter == nullptr);
   assert(default_limiter == nullptr && limiter != nullptr);
   default_limiter = std::move(limiter);
 }

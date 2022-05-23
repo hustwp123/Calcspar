@@ -21,6 +21,8 @@
 #include "test_util/sync_point.h"
 #include "util/rate_limiter.h"
 
+#include "util/token_limiter.h"
+
 namespace rocksdb {
 Options SanitizeOptions(const std::string& dbname, const Options& src) {
   auto db_options = SanitizeOptions(dbname, DBOptions(src));
@@ -1319,7 +1321,10 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   impl->wal_in_db_path_ =
       IsWalDirSameAsDBPath(&impl->immutable_db_options_);
+
   Prefetcher::Init();
+  TokenLimiter::SetDefaultInstance(
+      std::unique_ptr<TokenLimiter>(new TokenLimiter(3000)));
 
   impl->mutex_.Lock();
   // Handles create_if_missing, error_if_exists
