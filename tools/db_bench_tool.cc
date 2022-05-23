@@ -5206,6 +5206,7 @@ class Benchmark {
       }
       // Start the query
       if (query_type == 0) {
+        thread->stats.ResetLastOpTime();
         // the Get query
         gets++;
         if (FLAGS_num_column_families > 1) {
@@ -5225,13 +5226,14 @@ class Benchmark {
           fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
           abort();
         }
-
+        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
         if (thread->shared->read_rate_limiter && (gets + seek) % 100 == 0) {
           thread->shared->read_rate_limiter->Request(100, Env::IO_HIGH,
                                                      nullptr /*stats*/);
         }
-        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+        
       } else if (query_type == 1) {
+        thread->stats.ResetLastOpTime();
         // the Put query
         puts++;
         int64_t val_size = ParetoCdfInversion(
@@ -5250,13 +5252,16 @@ class Benchmark {
           fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           exit(1);
         }
+        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
+
 
         if (thread->shared->write_rate_limiter && puts % 100 == 0) {
           thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
                                                       nullptr /*stats*/);
         }
-        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
+        
       } else if (query_type == 2) {
+        thread->stats.ResetLastOpTime();
         // Seek query
         if (db_with_cfh->db != nullptr) {
           Iterator* single_iter = nullptr;

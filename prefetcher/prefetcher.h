@@ -77,7 +77,7 @@ class SstManager {
     uint64_t key = 0;
     uint32_t num = 0;
     for (auto it = sstMap.begin(); it != sstMap.end(); it++) {
-      if (it->second->get_times > num||num==0) {
+      if (it->second->get_times > num || num == 0) {
         num = it->second->get_times;
         key = it->first;
       }
@@ -100,14 +100,21 @@ class SstManager {
 class Prefetcher {
  public:
   static Prefetcher& _GetInst();
+  char* buf_ = nullptr;
   bool inited = false;
   static void Init();
   void _Init();
   static int64_t now();
 
-  ~Prefetcher() { fprintf(stderr, "~Prefetcher\n"); }
+  ~Prefetcher() {
+    if (buf_ != nullptr) {
+      free(buf_);
+      buf_ = nullptr;
+    }
+    fprintf(stderr, "~Prefetcher\n");
+  }
 
-  const size_t MAXSSTNUM = 347;  // ssd中缓存的sst_blk的最大数目
+  const size_t MAXSSTNUM = 2900;  // ssd中缓存的sst_blk的最大数目
 
   Env* env_ = nullptr;
   mutable port::Mutex lock_;        // synchronization primitive

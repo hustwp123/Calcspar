@@ -1,4 +1,5 @@
 #include "prefetcher/prefetcher.h"
+
 #include "util/token_limiter.h"
 
 namespace rocksdb {
@@ -44,14 +45,14 @@ void Prefetcher::_Prefetcher() {
     lock_.Unlock();
     return;
   }
-  fromKey=cloudManager.getMax();
+  fromKey = cloudManager.getMax();
   if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
   {
     lock_.Unlock();
   } else  // ssd中已放满
           // 需比较ssd中最冷的sst_blk的热度和cloud中最热的sst_blk的热度 进行替换
   {
-    outKey=ssdManager.getMin();
+    outKey = ssdManager.getMin();
     if ((ssdManager.sstMap[outKey]->get_times) <
         (cloudManager.sstMap[fromKey]->get_times)) {
       lock_.Unlock();
@@ -62,9 +63,9 @@ void Prefetcher::_Prefetcher() {
   }
   uint64_t fromSstId = fromKey / 10000;
   uint64_t blk_num = fromKey % 10000;
-  if(fromSstId==0)
-  {
-    fprintf(stderr,"err sstid==0 key==%lu gettimes= %lu\n",fromKey,cloudManager.sstMap[fromKey]->get_times);
+  if (fromSstId == 0) {
+    fprintf(stderr, "err sstid==0 key==%lu gettimes= %lu\n", fromKey,
+            cloudManager.sstMap[fromKey]->get_times);
     lock_.Lock();
     // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
     SstTemp *t = cloudManager.sstMap[fromSstId];
@@ -75,7 +76,7 @@ void Prefetcher::_Prefetcher() {
   }
   std::string old_fname = TableFileName(db_paths, fromSstId, 0);
   std::string new_fname = TableFileName(db_paths, fromKey, 1);
-  int readfd = open(old_fname.c_str(), O_RDONLY);
+  int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
   if (readfd == -1) {
     lock_.Lock();
     // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
@@ -85,23 +86,32 @@ void Prefetcher::_Prefetcher() {
     lock_.Unlock();
     return;
   }
-  int writefd = open(new_fname.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
+  int writefd = open(new_fname.c_str(), O_WRONLY | O_CREAT | O_DIRECT, S_IRWXU);
   if (writefd == -1) {
     fprintf(stderr, "file open error2 sstid=%lu\n", fromSstId);
     close(readfd);
     return;
   }
-  char buf[256 * 1024];
+  // char buf[256 * 1024];
+  // char *buf;
+  // int ret;
+  // ret = posix_memalign((void **)&buf, 4 * 1024, 256 * 1024);
+  // if (ret) {
+  //   fprintf(stderr, "posix_memalign failed");
+  //   exit(1);
+  // }
   uint64_t offset = blk_num * 256 * 1024;
-  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH, TokenLimiter::kRead);
-  int ret = pread(readfd, buf, 256 * 1024, offset);
+  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
+                                    TokenLimiter::kRead);
+  int ret = pread(readfd, buf_, 256 * 1024, offset);
   if (ret == -1) {
     fprintf(stderr, "pread error\n");
     close(readfd);
     close(writefd);
     return;
   }
-  ret = pwrite(writefd, buf, 256 * 1024, 0);
+  ret = pwrite(writefd, buf_, 256 * 1024, 0);
+  // std::flush(writefd);
   if (ret != 256 * 1024) {
     fprintf(stderr, "pwrite error\n");
     close(readfd);
@@ -110,7 +120,7 @@ void Prefetcher::_Prefetcher() {
   }
   close(readfd);
   close(writefd);
-  // fprintf(stderr, "prefetcher %lu file\n", fromKey);
+  fprintf(stderr, "prefetcher %lu file\n", fromKey);
   lock_.Lock();  //更新cloudManager ssdManager
   SstTemp *t = cloudManager.sstMap[fromKey];
   cloudManager.sstMap.erase(fromKey);
@@ -133,6 +143,7 @@ void Prefetcher::_CaluateSstHeat() {
   std::unordered_map<uint64_t, int> temp_sst_iotimes(sst_iotimes);
   sst_iotimes.clear();
   lock_sst_io.Unlock();
+  lock_.Lock();
   for (auto it = temp_sst_iotimes.begin(); it != temp_sst_iotimes.end(); it++) {
     if (cloudManager.sstMap.find(it->first) != cloudManager.sstMap.end()) {
       auto p = cloudManager.sstMap[it->first];
@@ -144,6 +155,7 @@ void Prefetcher::_CaluateSstHeat() {
       cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second * 0.8);
     }
   }
+  lock_.Unlock();
   // if (doPrefetch) {
   //   _Prefetcher();
   // }
@@ -155,7 +167,7 @@ size_t Prefetcher::TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
   return i._TryGetFromPrefetcher(sst_id, offset, n, scratch);
 }
 size_t Prefetcher::_PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
-                                    char *scratch) {
+                                      char *scratch) {
   size_t errorFlag = n + 1;
   std::string fname = TableFileName(db_paths, key, 1);
   int fd = open(fname.c_str(), O_RDONLY | O_DIRECT);
@@ -189,8 +201,8 @@ size_t Prefetcher::_PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
   return left;
 }
 size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
-                                     char *scratch) {
-  fprintf(stderr,"_PrefetcherTwoFiles begin\n");
+                                       char *scratch) {
+  fprintf(stderr, "_PrefetcherTwoFiles begin\n");
   size_t errorFlag = n + 1;
   std::string fname1 = TableFileName(db_paths, key, 1);
   std::string fname2 = TableFileName(db_paths, key + 1, 1);
@@ -202,7 +214,7 @@ size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
   }
   Status s;
   ssize_t r = -1;
-  size_t left = 256*1024-offset;
+  size_t left = 256 * 1024 - offset;
   char *ptr = scratch;
   while (left > 0) {
     r = pread(fd1, ptr, left, static_cast<off_t>(offset));
@@ -216,15 +228,15 @@ size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
     offset += r;
     left -= r;
   }
-  if (r < 0||left!=0) {
+  if (r < 0 || left != 0) {
     // An error: return a non-ok status
     fprintf(stderr, "IOerror\n");
     close(fd1);
     close(fd2);
     return errorFlag;
   }
-  left=n-(256*1024-offset);
-  offset=0;
+  left = n - (256 * 1024 - offset);
+  offset = 0;
   while (left > 0) {
     r = pread(fd2, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
@@ -246,7 +258,7 @@ size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
   }
   close(fd1);
   close(fd2);
-  fprintf(stderr,"_PrefetcherTwoFiles end\n");
+  fprintf(stderr, "_PrefetcherTwoFiles end\n");
   return left;
 }
 size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
@@ -257,7 +269,7 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
   if (offset + n > 256 * 1024) {
     // fprintf(stderr, "need 2 more blocks\n");
     return errorFlag;
-  } 
+  }
   // else if (offset + n > 256 * 1024) {
   //   lock_.Lock();
   //   if (ssdManager.sstMap.find(key) == ssdManager.sstMap.end() ) {
@@ -272,15 +284,15 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
   //   }
   //   lock_.Unlock();
   //   return _PrefetcherTwoFiles(key,offset,n,scratch);
-  // } 
+  // }
   else {
-    lock_.Lock();
+    // lock_.Lock();
     if (ssdManager.sstMap.find(key) == ssdManager.sstMap.end()) {
-      lock_.Unlock();
+      // lock_.Unlock();
       return errorFlag;
     }
-    lock_.Unlock();
-    return _PrefetcherOneFile(key,offset,n,scratch);
+    // lock_.Unlock();
+    return _PrefetcherOneFile(key, offset, n, scratch);
   }
 }
 
@@ -299,6 +311,14 @@ void Prefetcher::_Init() {
     return;
   }
   inited = true;
+
+  int ret;
+ret = posix_memalign((void **)&buf_, 4 * 1024, 256 * 1024);
+if (ret) {
+  fprintf(stderr, "posix_memalign failed");
+  exit(1);
+}
+
   std::thread t(caluateSstHeatThread);
   t.detach();
 
