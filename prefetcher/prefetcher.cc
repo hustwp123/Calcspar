@@ -120,7 +120,7 @@ void Prefetcher::_Prefetcher() {
   }
   close(readfd);
   close(writefd);
-  fprintf(stderr, "prefetcher %lu file\n", fromKey);
+  // fprintf(stderr, "prefetcher %lu file\n", fromKey);
   lock_.Lock();  //更新cloudManager ssdManager
   SstTemp *t = cloudManager.sstMap[fromKey];
   cloudManager.sstMap.erase(fromKey);
@@ -153,6 +153,36 @@ void Prefetcher::_CaluateSstHeat() {
       p->get_times = (p->get_times) * 0.2 + it->second * 0.8;
     } else {
       cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second * 0.8);
+    }
+  }
+  // std::vector<uint64_t> delKeys;
+  for(auto it=cloudManager.sstMap.begin();it!=cloudManager.sstMap.end();it++)
+  {
+    if(temp_sst_iotimes.find(it->first)==temp_sst_iotimes.end())
+    {
+      auto p=it->second;
+      auto key=it->first;
+      p->get_times=(p->get_times) * 0.2;
+      // if(p->get_times<1)
+      // {
+      //   delKeys.push_back(key);
+      // }
+    }
+  }
+  // for(int i=0;i<delKeys.size();i++)
+  // {
+  //   SstTemp *t = cloudManager.sstMap[delKeys[i]];
+  //   cloudManager.sstMap.erase(delKeys[i]);
+  //   delete t;
+  //   // cloudManager.sstMap.erase(delKeys[i]);
+  // }
+  for(auto it=ssdManager.sstMap.begin();it!=ssdManager.sstMap.end();it++)
+  {
+    if(temp_sst_iotimes.find(it->first)==temp_sst_iotimes.end())
+    {
+      auto p=it->second;
+      auto key=it->first;
+      p->get_times=(p->get_times) * 0.2;
     }
   }
   lock_.Unlock();
