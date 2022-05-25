@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <string>  //xp
 #include <thread>
 #include <unordered_map>
@@ -104,6 +105,8 @@ DEFINE_string(
     "multireadrandom,"
     "mixgraph,"
     "mixgraph2,"
+    "mixgraph3,"
+    "mixgraph4,"
     "readseq,"
     "readtocache,"
     "readreverse,"
@@ -1723,7 +1726,7 @@ class Stats {
   }
 
   // xp
-  int OpenReportFile() {
+  bool OpenReportFile() {
     std::regex pattern_csv(".csv");  // rocksdb use this
     std::regex pattern_hiccup(".hiccup");
     if (access(op_hiccup_report_fname.c_str(), F_OK) == 0) {
@@ -1737,7 +1740,34 @@ class Stats {
     if (!fp_op_hiccup_report) {
       fprintf(stderr, "ERROR! %s:%d: %s open report file %s fail\n", __FILE__,
               __LINE__, __func__, op_hiccup_report_fname.c_str());
-      return EXIT_FAILURE;
+      return false;
+    }
+    fprintf(stderr, "XXX open fp_ %s success\n",
+            op_hiccup_report_fname.c_str());
+    fprintf(
+        fp_op_hiccup_report,
+        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat99th\n");
+    fprintf(
+        stderr,
+        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat99th\n");
+    return true;
+  }
+
+  bool OpenReportFile2() {
+    std::regex pattern_csv(".csv");  // rocksdb use this
+    std::regex pattern_hiccup(".hiccup");
+    if (access(op_hiccup_report_fname.c_str(), F_OK) == 0) {
+      fprintf(stderr, "WARNING already open a op hiccup report file: %s\n",
+              op_hiccup_report_fname.c_str());
+      return true;
+    }
+    op_hiccup_report_fname =
+        std::regex_replace(FLAGS_report_file, pattern_csv, ".hiccup");
+    fp_op_hiccup_report = fopen("./test2.log", "a+");
+    if (!fp_op_hiccup_report) {
+      fprintf(stderr, "ERROR! %s:%d: %s open report file %s fail\n", __FILE__,
+              __LINE__, __func__, op_hiccup_report_fname.c_str());
+      return false;
     }
     fprintf(stderr, "XXX open fp_ %s success\n",
             op_hiccup_report_fname.c_str());
@@ -1847,8 +1877,207 @@ class Stats {
     last_op_finish_ = FLAGS_env->NowMicros();
   }
 
+  void FinishedOpsQUEUES(
+      DBWithColumnFamilies* db_with_cfh, DB* db, int64_t num_ops,
+      uint64_t op_start_time,
+      enum OperationType op_type = kOthers) {  // num_ops is 1
+    // if (fp_op_hiccup_report == NULL) {
+    //   if (true != OpenReportFile()) {  // xp
+    //     fprintf(stderr, "ERROR open op hiccup file %s failed\n",
+    //             op_hiccup_report_fname.c_str());
+    //   }
+    // }
+    if (reporter_agent_) {
+      reporter_agent_->ReportFinishedOps(num_ops);
+    }
+    if (FLAGS_histogram) {
+      uint64_t now = FLAGS_env->NowMicros();
+      uint64_t micros = now - op_start_time;
+
+      if (hist_.find(op_type) == hist_.end()) {
+        auto hist_temp = std::make_shared<HistogramImpl>();
+        hist_.insert({op_type, std::move(hist_temp)});
+      }
+      hist_[op_type]->Add(micros);
+
+      if (kWrite == op_type) {  // xp
+        writedone_ += num_ops;
+        if (hist_.find(kWriteHiccup) == hist_.end()) {
+          auto hist_tmp_write_hiccup = std::make_shared<HistogramImpl>();
+          hist_.insert({kWriteHiccup, std::move(hist_tmp_write_hiccup)});
+        }
+        hist_[kWriteHiccup]->Add(micros);
+      } else if (kRead == op_type) {
+        readdone_ += num_ops;
+        if (hist_.find(kReadHiccup) == hist_.end()) {
+          auto hist_tmp_read_hiccup = std::make_shared<HistogramImpl>();
+          hist_.insert({kReadHiccup, std::move(hist_tmp_read_hiccup)});
+        }
+        hist_[kReadHiccup]->Add(micros);
+      }
+
+      if (micros > 20000 && !FLAGS_stats_interval) {
+        fprintf(stderr, "long op: %" PRIu64 " micros%30s\r", micros, "");
+        fflush(stderr);
+      }
+      last_op_finish_ = now;
+    }
+
+    done_ += num_ops;
+    if (done_ >= next_report_) {
+      if (!FLAGS_stats_interval) {
+        if (next_report_ < 1000)
+          next_report_ += 100;
+        else if (next_report_ < 5000)
+          next_report_ += 500;
+        else if (next_report_ < 10000)
+          next_report_ += 1000;
+        else if (next_report_ < 50000)
+          next_report_ += 5000;
+        else if (next_report_ < 100000)
+          next_report_ += 10000;
+        else if (next_report_ < 500000)
+          next_report_ += 50000;
+        else
+          next_report_ += 100000;
+        fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
+      } else {
+        uint64_t now = FLAGS_env->NowMicros();
+        int64_t usecs_since_last = now - last_report_finish_;
+
+        // Determine whether to print status where interval is either
+        // each N operations or each N seconds.
+
+        if (FLAGS_stats_interval_seconds &&
+            usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
+          // Don't check again for this many operations
+          next_report_ += FLAGS_stats_interval;
+
+        } else {
+          // xp
+          //  threadID, timestamp, op/s
+          if (fp_op_hiccup_report) {
+            // write
+            fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
+                    (now - start_) / 1000000.0,
+                    (writedone_ - last_report_writedone_) /
+                        (usecs_since_last / 1000000.0));
+            fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
+                    (now - start_) / 1000000.0,
+                    (writedone_ - last_report_writedone_) /
+                        (usecs_since_last / 1000000.0));
+            fflush(fp_op_hiccup_report);
+            // latency min, max, avg., 99th
+            fprintf(stderr, "write %8ld   %8ld   %8.0f   %8.0f\n",
+                    hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                    hist_[kWriteHiccup]->Average(),
+                    hist_[kWriteHiccup]->Percentile(99.0));
+            fprintf(fp_op_hiccup_report, "write %8ld   %8ld   %8.0f   %8.0f\n",
+                    hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                    hist_[kWriteHiccup]->Average(),
+                    hist_[kWriteHiccup]->Percentile(99.0));
+            fflush(fp_op_hiccup_report);
+            hist_[kWriteHiccup]->Clear();
+
+            // read
+            fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
+                    (now - start_) / 1000000.0,
+                    (readdone_ - last_report_readdone_) /
+                        (usecs_since_last / 1000000.0));
+            fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
+                    (now - start_) / 1000000.0,
+                    (readdone_ - last_report_readdone_) /
+                        (usecs_since_last / 1000000.0));
+            fflush(fp_op_hiccup_report);
+            fprintf(stderr, "read %8ld   %8ld   %8.0f   %8.0f\n",
+                    hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                    hist_[kReadHiccup]->Average(),
+                    hist_[kReadHiccup]->Percentile(99.0));
+            fprintf(fp_op_hiccup_report, "read %8ld   %8ld   %8.0f   %8.0f\n",
+                    hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                    hist_[kReadHiccup]->Average(),
+                    hist_[kReadHiccup]->Percentile(99.0));
+            fflush(fp_op_hiccup_report);
+            hist_[kReadHiccup]->Clear();
+          }
+
+          // fprintf(stderr,
+          //         "%s ... thread %d: (%" PRIu64 ",%" PRIu64 ") ops and "
+          //         "(%.1f,%.1f) ops/second in (%.6f,%.6f) seconds\n",
+          //         FLAGS_env->TimeToString(now/1000000).c_str(),
+          //         id_,
+          //         done_ - last_report_done_, done_,
+          //         (done_ - last_report_done_) /
+          //         (usecs_since_last / 1000000.0),
+          //         done_ / ((now - start_) / 1000000.0),
+          //         (now - last_report_finish_) / 1000000.0,
+          //         (now - start_) / 1000000.0);
+
+          if (id_ == 0 && FLAGS_stats_per_interval) {
+            std::string stats;
+
+            if (db_with_cfh && db_with_cfh->num_created.load()) {
+              for (size_t i = 0; i < db_with_cfh->num_created.load(); ++i) {
+                if (db->GetProperty(db_with_cfh->cfh[i], "rocksdb.cfstats",
+                                    &stats))
+                  fprintf(stderr, "%s\n", stats.c_str());
+                if (FLAGS_show_table_properties) {
+                  for (int level = 0; level < FLAGS_num_levels; ++level) {
+                    if (db->GetProperty(
+                            db_with_cfh->cfh[i],
+                            "rocksdb.aggregated-table-properties-at-level" +
+                                ToString(level),
+                            &stats)) {
+                      if (stats.find("# entries=0") == std::string::npos) {
+                        fprintf(stderr, "Level[%d]: %s\n", level,
+                                stats.c_str());
+                      }
+                    }
+                  }
+                }
+              }
+            } else if (db) {
+              if (db->GetProperty("rocksdb.stats", &stats)) {
+                fprintf(stderr, "%s\n", stats.c_str());
+              }
+              if (FLAGS_show_table_properties) {
+                for (int level = 0; level < FLAGS_num_levels; ++level) {
+                  if (db->GetProperty(
+                          "rocksdb.aggregated-table-properties-at-level" +
+                              ToString(level),
+                          &stats)) {
+                    if (stats.find("# entries=0") == std::string::npos) {
+                      fprintf(stderr, "Level[%d]: %s\n", level, stats.c_str());
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          next_report_ += FLAGS_stats_interval;
+          last_report_finish_ = now;
+          last_report_done_ = done_;
+
+          last_report_readdone_ = readdone_;
+          last_report_writedone_ = writedone_;
+        }
+      }
+      if (id_ == 0 && FLAGS_thread_status_per_interval) {
+        PrintThreadStatus();
+      }
+      fflush(stderr);
+    }
+  }
+
   void FinishedOps(DBWithColumnFamilies* db_with_cfh, DB* db, int64_t num_ops,
                    enum OperationType op_type = kOthers) {
+    if (fp_op_hiccup_report == NULL) {
+      if (true != OpenReportFile()) {  // xp
+        fprintf(stderr, "ERROR open op hiccup file %s failed\n",
+                op_hiccup_report_fname.c_str());
+      }
+    }
     if (reporter_agent_) {
       reporter_agent_->ReportFinishedOps(num_ops);
     }
@@ -2032,6 +2261,8 @@ class Stats {
     }
   }
 
+  
+
   void AddBytes(int64_t n) { bytes_ += n; }
 
   void Report(const Slice& name) {
@@ -2161,6 +2392,61 @@ class TimestampEmulator {
   void Inc() { timestamp_++; }
 };
 
+template <typename T, typename Container = std::queue<T>>
+class Queue  //无界队列
+{
+ public:
+  Queue() = default;
+  ~Queue() = default;
+
+  //禁止拷贝和移动，编译器会自动delete
+  /*Queue(const Queue&) = delete;
+  Queue(Queue&&) = delete;
+  Queue& operator=(const Queue&) = delete;
+  Queue& operator=(Queue&&) = delete;*/
+
+  void push(const T& val) { emplace(val); }
+
+  void push(T&& val) { emplace(std::move(val)); }
+
+  template <typename... Args>
+  void emplace(Args&&... args) {
+    std::lock_guard<std::mutex> lk{mtx_};
+    q_.push(std::forward<Args>(args)...);
+    cv_.notify_one();
+  }
+
+  T pop()  //阻塞
+  {
+    std::unique_lock<std::mutex> lk{mtx_};
+    cv_.wait(lk, [this] {
+      return !q_.empty();
+    });  //如果队列不为空就继续执行，否则阻塞
+    assert(!q_.empty());
+    T ret{std::move_if_noexcept(q_.front())};
+    q_.pop();
+    return ret;
+  }
+
+  // std::optional<T> try_pop()//非阻塞
+  // {
+  // 	std::unique_lock lk{ mtx_ };
+  // 	if (q_.empty())return {};
+  // 	std::optional<T> ret{ std::move_if_noexcept(q_.front()) };
+  // 	q_.pop();
+  // 	return ret;
+  // }
+  bool empty() const {
+    std::lock_guard<std::mutex> lk{mtx_};
+    return q_.empty();
+  }
+
+ private:
+  Container q_;
+  mutable std::mutex mtx_;
+  std::condition_variable cv_;
+};
+
 // State shared by all concurrent executions of the same benchmark.
 struct SharedState {
   port::Mutex mu;
@@ -2180,6 +2466,10 @@ struct SharedState {
   long num_done;
   bool start;
 
+  Queue<std::pair<int, uint64_t>> op_queues;
+  // std::queue<std::pair<int, uint64_t>> op_queues;
+  bool loadend = false;
+
   SharedState() : cv(&mu), perf_level(FLAGS_perf_level) {}
 };
 
@@ -2188,6 +2478,7 @@ struct ThreadState {
   int tid;        // 0..n-1 when running in n threads
   Random64 rand;  // Has different seeds for different threads
   Stats stats;
+  Stats stats2;
   SharedState* shared;
 
   /* implicit */ ThreadState(int index)
@@ -2930,6 +3221,10 @@ class Benchmark {
         method = &Benchmark::MixGraph;
       } else if (name == "mixgraph2") {
         method = &Benchmark::MixGraph2;
+      } else if (name == "mixgraph3") {
+        method = &Benchmark::MixGraph3;
+      } else if (name == "mixgraph4") {
+        method = &Benchmark::MixGraph4;
       } else if (name == "readmissing") {
         ++key_size_;
         method = &Benchmark::ReadRandom;
@@ -3526,10 +3821,10 @@ class Benchmark {
 
     assert(db_.db == nullptr);
 
-    options.db_paths = {
-        {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
-        {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
-    };
+    // options.db_paths = {
+    //     {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+    //     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
+    // };
 
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
@@ -5462,6 +5757,7 @@ class Benchmark {
   void MixGraph3(ThreadState* thread) {
     fprintf(stderr, "MixGraph3\n");
     if (thread->tid == 0) {
+      fprintf(stderr, "load thread\n");
       // the limit of qps initiation
       int64_t gets = 0;
       int64_t puts = 0;
@@ -5480,10 +5776,9 @@ class Benchmark {
       }
       Duration duration(FLAGS_duration, reads_);
       while (!duration.Done(1)) {
-        int64_t ini_rand, rand_v, key_rand, key_seed;
+        int64_t ini_rand, rand_v;
         ini_rand = GetRandomKey(&thread->rand);
         rand_v = ini_rand % FLAGS_num;
-        double u = static_cast<double>(rand_v) / FLAGS_num;
         int query_type = query.GetType(rand_v);
         // change the qps
         uint64_t now = FLAGS_env->NowMicros();
@@ -5517,11 +5812,11 @@ class Benchmark {
         }
         if (query_type == 0) {
           gets++;
-          std::chrono::microseconds ms =
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::system_clock::now().time_since_epoch());
-          std::pair<int, std::chrono::microseconds> val_timestamp_tuple(
-              query_type, ms);
+          // std::chrono::microseconds ms =
+          //     std::chrono::duration_cast<std::chrono::milliseconds>(
+          //         std::chrono::system_clock::now().time_since_epoch());
+          uint64_t ms = FLAGS_env->NowMicros();
+          std::pair<int, uint64_t> val_timestamp_tuple(query_type, ms);
           thread->shared->op_queues.push(val_timestamp_tuple);
           if (thread->shared->read_rate_limiter && (gets + seek) % 100 == 0) {
             thread->shared->read_rate_limiter->Request(100, Env::IO_HIGH,
@@ -5529,11 +5824,11 @@ class Benchmark {
           }
         } else if (query_type == 1) {
           puts++;
-          std::chrono::microseconds ms =
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::system_clock::now().time_since_epoch());
-          std::pair<int, std::chrono::microseconds> val_timestamp_tuple(
-              query_type, ms);
+          // std::chrono::microseconds ms =
+          //     std::chrono::duration_cast<std::chrono::milliseconds>(
+          //         std::chrono::system_clock::now().time_since_epoch());
+          uint64_t ms = FLAGS_env->NowMicros();
+          std::pair<int, uint64_t> val_timestamp_tuple(query_type, ms);
           thread->shared->op_queues.push(val_timestamp_tuple);
           if (thread->shared->write_rate_limiter && puts % 100 == 0) {
             thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
@@ -5541,7 +5836,598 @@ class Benchmark {
           }
         }
       }
+      fprintf(stderr, "load end\n");
+      thread->shared->loadend = true;
+    } else {
+      fprintf(stderr, "run thread\n");
+      ReadOptions options(FLAGS_verify_checksum, true);
+      int64_t gets = 0;
+      int64_t puts = 0;
+      int64_t get_found = 0;
+      int64_t seek = 0;
+      int64_t seek_found = 0;
+      int64_t bytes = 0;
+      double total_scan_length = 0;
+      double total_val_size = 0;
+      const int64_t default_value_max = 1 * 1024 * 1024;
+      int64_t value_max = default_value_max;
+      int64_t scan_len_max = FLAGS_mix_max_scan_len;
+      bool use_prefix_modeling = false;
+      bool use_random_modeling = false;
+      GenerateTwoTermExpKeys gen_exp;
+      char value_buffer[default_value_max];
+      RandomGenerator gen;
+      Status s;
+      if (value_max > FLAGS_mix_max_value_size) {
+        value_max = FLAGS_mix_max_value_size;
+      }
+      std::unique_ptr<const char[]> key_guard;
+      Slice key = AllocateKey(&key_guard);
+      PinnableSlice pinnable_val;
+      // Decide if user wants to use prefix based key generation
+      if (FLAGS_keyrange_dist_a != 0.0 || FLAGS_keyrange_dist_b != 0.0 ||
+          FLAGS_keyrange_dist_c != 0.0 || FLAGS_keyrange_dist_d != 0.0) {
+        use_prefix_modeling = true;
+        gen_exp.InitiateExpDistribution(
+            FLAGS_num, FLAGS_keyrange_dist_a, FLAGS_keyrange_dist_b,
+            FLAGS_keyrange_dist_c, FLAGS_keyrange_dist_d);
+      }
+      if (FLAGS_key_dist_a == 0 || FLAGS_key_dist_b == 0) {
+        use_random_modeling = true;
+      }
+      Duration duration(FLAGS_duration, reads_);
+      bool flag = false;
+      if (flag) {
+        while (1) {
+          if (!thread->shared->op_queues.empty()) {
+            std::pair<int, uint64_t> pair_val_time;
+            //  =thread->shared->op_queues.front();
+            thread->shared->op_queues.pop();
+
+            // uint64_t out_of_queue_time = FLAGS_env->NowMicros();
+
+            DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
+            int64_t ini_rand, rand_v, key_rand, key_seed;
+            ini_rand = GetRandomKey(&thread->rand);
+            rand_v = ini_rand % FLAGS_num;
+            double u = static_cast<double>(rand_v) / FLAGS_num;
+
+            // Generate the keyID based on the key hotness and prefix hotness
+            if (use_random_modeling) {
+              key_rand = ini_rand;
+            } else if (use_prefix_modeling) {
+              key_rand = gen_exp.DistGetKeyID(ini_rand, FLAGS_key_dist_a,
+                                              FLAGS_key_dist_b);
+            } else {
+              key_seed =
+                  PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
+              Random64 rand(key_seed);
+              key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+            }
+            GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+
+            // Start the query
+            if (pair_val_time.first == 0) {
+              thread->stats.ResetLastOpTime();
+              // the Get query
+              gets++;
+              if (FLAGS_num_column_families > 1) {
+                s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(key_rand),
+                                         key, &pinnable_val);
+              } else {
+                pinnable_val.Reset();
+                s = db_with_cfh->db->Get(options,
+                                         db_with_cfh->db->DefaultColumnFamily(),
+                                         key, &pinnable_val);
+              }
+
+              if (s.ok()) {
+                get_found++;
+                bytes += key.size() + pinnable_val.size();
+              } else if (!s.IsNotFound()) {
+                fprintf(stderr, "Get returned an error: %s\n",
+                        s.ToString().c_str());
+                abort();
+              }
+              // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+              // kRead);
+              thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                              pair_val_time.second,
+                                              //  out_of_queue_time,
+                                              kRead);
+              if (thread->shared->read_rate_limiter &&
+                  (gets + seek) % 100 == 0) {
+                thread->shared->read_rate_limiter->Request(100, Env::IO_HIGH,
+                                                           nullptr /*stats*/);
+              }
+
+            } else if (pair_val_time.first == 1) {
+              thread->stats.ResetLastOpTime();
+              // the Put query
+              puts++;
+              int64_t val_size = ParetoCdfInversion(
+                  u, FLAGS_value_theta, FLAGS_value_k, FLAGS_value_sigma);
+              if (val_size < 10) {
+                val_size = 10;
+              } else if (val_size > value_max) {
+                val_size = val_size % value_max;
+              }
+              total_val_size += val_size;
+
+              s = db_with_cfh->db->Put(
+                  write_options_, key,
+                  gen.Generate(static_cast<unsigned int>(val_size)));
+              if (!s.ok()) {
+                fprintf(stderr, "put error: %s\n", s.ToString().c_str());
+                exit(1);
+              }
+              // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+              // kWrite);
+              thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                              pair_val_time.second,
+                                              //  out_of_queue_time,
+                                              kWrite);
+
+              if (thread->shared->write_rate_limiter && puts % 100 == 0) {
+                thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
+                                                            nullptr /*stats*/);
+              }
+
+            } else if (pair_val_time.first == 2) {
+              thread->stats.ResetLastOpTime();
+              // Seek query
+              if (db_with_cfh->db != nullptr) {
+                Iterator* single_iter = nullptr;
+                single_iter = db_with_cfh->db->NewIterator(options);
+                if (single_iter != nullptr) {
+                  single_iter->Seek(key);
+                  seek++;
+                  if (single_iter->Valid() &&
+                      single_iter->key().compare(key) == 0) {
+                    seek_found++;
+                  }
+                  int64_t scan_length =
+                      ParetoCdfInversion(u, FLAGS_iter_theta, FLAGS_iter_k,
+                                         FLAGS_iter_sigma) %
+                      scan_len_max;
+                  for (int64_t j = 0; j < scan_length && single_iter->Valid();
+                       j++) {
+                    Slice value = single_iter->value();
+                    memcpy(value_buffer, value.data(),
+                           std::min(value.size(), sizeof(value_buffer)));
+                    bytes +=
+                        single_iter->key().size() + single_iter->value().size();
+                    single_iter->Next();
+                    assert(single_iter->status().ok());
+                    total_scan_length++;
+                  }
+                }
+                delete single_iter;
+              }
+              // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+              // kSeek);
+              thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                              pair_val_time.second,
+                                              // out_of_queue_time,
+                                              kSeek);
+            }
+            if (duration.Done(1)) {
+              break;
+            }
+            if (thread->shared->loadend) {
+              fprintf(stderr, "break because load end\n");
+              break;
+            }
+          }
+        }
+      } else {
+        while (!duration.Done(1)) {
+          std::pair<int, uint64_t> pair_val_time =
+              thread->shared->op_queues.pop();
+          // thread->shared->op_queues.pop();
+          // uint64_t out_of_queue_time = FLAGS_env->NowMicros();
+
+          DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
+          int64_t ini_rand, rand_v, key_rand, key_seed;
+          ini_rand = GetRandomKey(&thread->rand);
+          rand_v = ini_rand % FLAGS_num;
+          double u = static_cast<double>(rand_v) / FLAGS_num;
+
+          // Generate the keyID based on the key hotness and prefix hotness
+          if (use_random_modeling) {
+            key_rand = ini_rand;
+          } else if (use_prefix_modeling) {
+            key_rand = gen_exp.DistGetKeyID(ini_rand, FLAGS_key_dist_a,
+                                            FLAGS_key_dist_b);
+          } else {
+            key_seed = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
+            Random64 rand(key_seed);
+            key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+          }
+          GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+
+          // Start the query
+          if (pair_val_time.first == 0) {
+            thread->stats.ResetLastOpTime();
+            // the Get query
+            gets++;
+            if (FLAGS_num_column_families > 1) {
+              s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(key_rand),
+                                       key, &pinnable_val);
+            } else {
+              pinnable_val.Reset();
+              s = db_with_cfh->db->Get(options,
+                                       db_with_cfh->db->DefaultColumnFamily(),
+                                       key, &pinnable_val);
+            }
+
+            if (s.ok()) {
+              get_found++;
+              bytes += key.size() + pinnable_val.size();
+            } else if (!s.IsNotFound()) {
+              fprintf(stderr, "Get returned an error: %s\n",
+                      s.ToString().c_str());
+              abort();
+            }
+            // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+            // kRead);
+            thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                            pair_val_time.second, kRead);
+            if (thread->shared->read_rate_limiter && (gets + seek) % 100 == 0) {
+              thread->shared->read_rate_limiter->Request(100, Env::IO_HIGH,
+                                                         nullptr);
+            }
+
+          } else if (pair_val_time.first == 1) {
+            thread->stats.ResetLastOpTime();
+            // the Put query
+            puts++;
+            int64_t val_size = ParetoCdfInversion(
+                u, FLAGS_value_theta, FLAGS_value_k, FLAGS_value_sigma);
+            if (val_size < 10) {
+              val_size = 10;
+            } else if (val_size > value_max) {
+              val_size = val_size % value_max;
+            }
+            total_val_size += val_size;
+
+            s = db_with_cfh->db->Put(
+                write_options_, key,
+                gen.Generate(static_cast<unsigned int>(val_size)));
+            if (!s.ok()) {
+              fprintf(stderr, "put error: %s\n", s.ToString().c_str());
+              exit(1);
+            }
+            // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+            // kWrite);
+            thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                            pair_val_time.second, kWrite);
+
+            if (thread->shared->write_rate_limiter && puts % 100 == 0) {
+              thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
+                                                          nullptr);
+            }
+
+          } else if (pair_val_time.first == 2) {
+            thread->stats.ResetLastOpTime();
+            // Seek query
+            if (db_with_cfh->db != nullptr) {
+              Iterator* single_iter = nullptr;
+              single_iter = db_with_cfh->db->NewIterator(options);
+              if (single_iter != nullptr) {
+                single_iter->Seek(key);
+                seek++;
+                if (single_iter->Valid() &&
+                    single_iter->key().compare(key) == 0) {
+                  seek_found++;
+                }
+                int64_t scan_length =
+                    ParetoCdfInversion(u, FLAGS_iter_theta, FLAGS_iter_k,
+                                       FLAGS_iter_sigma) %
+                    scan_len_max;
+                for (int64_t j = 0; j < scan_length && single_iter->Valid();
+                     j++) {
+                  Slice value = single_iter->value();
+                  memcpy(value_buffer, value.data(),
+                         std::min(value.size(), sizeof(value_buffer)));
+                  bytes +=
+                      single_iter->key().size() + single_iter->value().size();
+                  single_iter->Next();
+                  assert(single_iter->status().ok());
+                  total_scan_length++;
+                }
+              }
+              delete single_iter;
+            }
+            // thread->stats.FinishedOps2(db_with_cfh, db_with_cfh->db, 1,
+            // kSeek);
+            thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,
+                                            pair_val_time.second, kSeek);
+          }
+          // if (duration.Done(1)) {
+          //   break;
+          // }
+          if (thread->shared->loadend) {
+            fprintf(stderr, "break because load end\n");
+            break;
+          }
+        }
+      }
+      fprintf(stderr, "run thread end\n");
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "( Gets:%" PRIu64 " Puts:%" PRIu64 " Seek:%" PRIu64
+               ", reads %" PRIu64 " in %" PRIu64
+               " found, "
+               "avg size: %.1f value, %.1f scan)\n",
+               gets, puts, seek, get_found + seek_found, gets + seek,
+               total_val_size / puts, total_scan_length / seek);
+
+      thread->stats.AddBytes(bytes);
+      thread->stats.AddMessage(msg);
+
+      thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+                               get_perf_context()->ToString());
     }
+  }
+
+  class SineRateGenerator {
+   private:
+    double sine_a_;
+    double sine_b_;
+    double sine_c_;
+    double sine_d_;
+    uint64_t sine_mix_rate_interval_microseconds_;
+    std::mutex mu_;
+    int period_count_;
+    int period_total_req_;
+    int period_req_count_;
+    uint64_t interval_us_in_period_;
+    uint64_t base_time_us_;
+
+   public:
+    SineRateGenerator(double sine_a, double sine_b, double sine_c,
+                      double sine_d, int sine_mix_rate_interval_milliseconds)
+        : sine_a_(sine_a),
+          sine_b_(sine_b),
+          sine_c_(sine_c),
+          sine_d_(sine_d),
+          sine_mix_rate_interval_microseconds_(
+              uint64_t(sine_mix_rate_interval_milliseconds) * 1000),
+          period_count_(0),
+          period_total_req_(0),
+          period_req_count_(0),
+          interval_us_in_period_(0),
+          base_time_us_(FLAGS_env->NowMicros()) {
+      {
+        period_total_req_ = CalcPeroidReqCount(
+            double(base_time_us_ +
+                   period_count_ * sine_mix_rate_interval_microseconds_) /
+            double(std::micro::den));
+        interval_us_in_period_ =
+            sine_mix_rate_interval_microseconds_ / period_total_req_;
+      };
+    }
+
+    uint64_t Next() {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (++period_req_count_ == period_total_req_) {
+        period_count_++;
+        period_req_count_ = 0;
+        period_total_req_ = CalcPeroidReqCount(
+            double(base_time_us_ +
+                   period_count_ * sine_mix_rate_interval_microseconds_) /
+            double(std::micro::den));
+
+        interval_us_in_period_ =
+            sine_mix_rate_interval_microseconds_ / period_total_req_;
+      }
+
+      return CalcReqSendMicros();
+    }
+
+    uint64_t Last() {
+      std::lock_guard<std::mutex> lock(mu_);
+      return CalcReqSendMicros();
+    }
+
+   private:
+    double CalcQPS(double second) {
+      return sine_a_ * std::sin(sine_b_ * second + sine_c_) + sine_d_;
+    }
+
+    uint64_t CalcPeroidReqCount(double second) {
+      return uint64_t(CalcQPS(second) *
+                      (double(sine_mix_rate_interval_microseconds_) /
+                       double(std::micro::den)));
+    }
+
+    uint64_t CalcReqSendMicros() {
+      return base_time_us_ +
+             period_count_ * sine_mix_rate_interval_microseconds_ +
+             period_req_count_ * interval_us_in_period_;
+    }
+  };
+
+  void MixGraph4(ThreadState* thread) {
+    fprintf(stderr, "MixGraph2\n");
+    ReadOptions options(FLAGS_verify_checksum, true);
+    int64_t gets = 0;
+    int64_t puts = 0;
+    int64_t get_found = 0;
+    int64_t seek = 0;
+    int64_t seek_found = 0;
+    int64_t bytes = 0;
+    double total_scan_length = 0;
+    double total_val_size = 0;
+    const int64_t default_value_max = 1 * 1024 * 1024;
+    int64_t value_max = default_value_max;
+    int64_t scan_len_max = FLAGS_mix_max_scan_len;
+    bool use_prefix_modeling = false;
+    bool use_random_modeling = false;
+    GenerateTwoTermExpKeys gen_exp;
+    std::vector<double> ratio{FLAGS_mix_get_ratio, FLAGS_mix_put_ratio,
+                              FLAGS_mix_seek_ratio};
+    char value_buffer[default_value_max];
+    QueryDecider query;
+    RandomGenerator gen;
+    Status s;
+    if (value_max > FLAGS_mix_max_value_size) {
+      value_max = FLAGS_mix_max_value_size;
+    }
+
+    std::unique_ptr<const char[]> key_guard;
+    Slice key = AllocateKey(&key_guard);
+    PinnableSlice pinnable_val;
+    query.Initiate(ratio);
+
+    // the limit of qps initiation
+    SineRateGenerator generator(FLAGS_sine_a, FLAGS_sine_b, FLAGS_sine_c,
+                                FLAGS_sine_d,
+                                FLAGS_sine_mix_rate_interval_milliseconds);
+
+    // Decide if user wants to use prefix based key generation
+    if (FLAGS_keyrange_dist_a != 0.0 || FLAGS_keyrange_dist_b != 0.0 ||
+        FLAGS_keyrange_dist_c != 0.0 || FLAGS_keyrange_dist_d != 0.0) {
+      use_prefix_modeling = true;
+      gen_exp.InitiateExpDistribution(
+          FLAGS_num, FLAGS_keyrange_dist_a, FLAGS_keyrange_dist_b,
+          FLAGS_keyrange_dist_c, FLAGS_keyrange_dist_d);
+    }
+    if (FLAGS_key_dist_a == 0 || FLAGS_key_dist_b == 0) {
+      use_random_modeling = true;
+    }
+
+    Duration duration(FLAGS_duration, reads_);
+    while (!duration.Done(1)) {
+      
+      DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
+      int64_t ini_rand, rand_v, key_rand, key_seed;
+      ini_rand = GetRandomKey(&thread->rand);
+      rand_v = ini_rand % FLAGS_num;
+      double u = static_cast<double>(rand_v) / FLAGS_num;
+
+      // Generate the keyID based on the key hotness and prefix hotness
+      if (use_random_modeling) {
+        key_rand = ini_rand;
+      } else if (use_prefix_modeling) {
+        key_rand =
+            gen_exp.DistGetKeyID(ini_rand, FLAGS_key_dist_a, FLAGS_key_dist_b);
+      } else {
+        key_seed = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
+        Random64 rand(key_seed);
+        key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+      }
+      GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      int query_type = query.GetType(rand_v);
+
+      uint64_t start_time = FLAGS_env->NowMicros();
+      uint64_t send_us;
+      if (FLAGS_sine_mix_rate) {
+        send_us = generator.Next();
+        if (start_time < send_us) {
+          usleep(send_us - start_time);
+        }
+      }
+      // Start the query
+      if (query_type == 0) {
+        thread->stats.ResetLastOpTime();
+        // the Get query
+        gets++;
+        if (FLAGS_num_column_families > 1) {
+          s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(key_rand), key,
+                                   &pinnable_val);
+        } else {
+          pinnable_val.Reset();
+          s = db_with_cfh->db->Get(options,
+                                   db_with_cfh->db->DefaultColumnFamily(), key,
+                                   &pinnable_val);
+        }
+
+        if (s.ok()) {
+          get_found++;
+          bytes += key.size() + pinnable_val.size();
+        } else if (!s.IsNotFound()) {
+          fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
+          abort();
+        }
+        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kRead);
+
+      } else if (query_type == 1) {
+        thread->stats.ResetLastOpTime();
+        // the Put query
+        puts++;
+        int64_t val_size = ParetoCdfInversion(u, FLAGS_value_theta,
+                                              FLAGS_value_k, FLAGS_value_sigma);
+        if (val_size < 10) {
+          val_size = 10;
+        } else if (val_size > value_max) {
+          val_size = val_size % value_max;
+        }
+        total_val_size += val_size;
+
+        s = db_with_cfh->db->Put(
+            write_options_, key,
+            gen.Generate(static_cast<unsigned int>(val_size)));
+        if (!s.ok()) {
+          fprintf(stderr, "put error: %s\n", s.ToString().c_str());
+          exit(1);
+        }
+        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
+        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kWrite);
+
+      } else if (query_type == 2) {
+        thread->stats.ResetLastOpTime();
+        // Seek query
+        if (db_with_cfh->db != nullptr) {
+          Iterator* single_iter = nullptr;
+          single_iter = db_with_cfh->db->NewIterator(options);
+          if (single_iter != nullptr) {
+            single_iter->Seek(key);
+            seek++;
+            if (single_iter->Valid() && single_iter->key().compare(key) == 0) {
+              seek_found++;
+            }
+            int64_t scan_length =
+                ParetoCdfInversion(u, FLAGS_iter_theta, FLAGS_iter_k,
+                                   FLAGS_iter_sigma) %
+                scan_len_max;
+            for (int64_t j = 0; j < scan_length && single_iter->Valid(); j++) {
+              Slice value = single_iter->value();
+              memcpy(value_buffer, value.data(),
+                     std::min(value.size(), sizeof(value_buffer)));
+              bytes += single_iter->key().size() + single_iter->value().size();
+              single_iter->Next();
+              assert(single_iter->status().ok());
+              total_scan_length++;
+            }
+          }
+          delete single_iter;
+        }
+        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kSeek);
+        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kSeek);
+      }
+    }
+    char msg[256];
+    snprintf(msg, sizeof(msg),
+             "( Gets:%" PRIu64 " Puts:%" PRIu64 " Seek:%" PRIu64
+             ", reads %" PRIu64 " in %" PRIu64
+             " found, "
+             "avg size: %.1f value, %.1f scan)\n",
+             gets, puts, seek, get_found + seek_found, gets + seek,
+             total_val_size / puts, total_scan_length / seek);
+
+    thread->stats.AddBytes(bytes);
+    thread->stats.AddMessage(msg);
+
+    thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+                             get_perf_context()->ToString());
+
+    // if (FLAGS_perf_level > ROCKSDB_NAMESPACE::PerfLevel::kDisable) {
+    //   thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+    //                            get_perf_context()->ToString());
+    // }
   }
 
   // The graph wokrload mixed with Get, Put, Iterator
