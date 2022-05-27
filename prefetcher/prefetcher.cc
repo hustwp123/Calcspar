@@ -35,6 +35,88 @@ void Prefetcher::CaluateSstHeat() {
   static Prefetcher &i = _GetInst();
   i._CaluateSstHeat();
 }
+void Prefetcher::_PrefetcherToMem() {
+  lock_.Lock();
+  // fprintf(stderr, "prefetcher begin\n");
+  uint64_t fromKey = 0;
+  uint64_t outKey = 0;
+  if (cloudManager.sstMap.empty())  // cloud中无sst
+  {
+    lock_.Unlock();
+    return;
+  }
+  fromKey = cloudManager.getMax();
+  if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
+  {
+    lock_.Unlock();
+  } else  // ssd中已放满
+          // 需比较ssd中最冷的sst_blk的热度和cloud中最热的sst_blk的热度 进行替换
+  {
+    outKey = ssdManager.getMin();
+    if ((ssdManager.sstMap[outKey]->get_times) <
+        (cloudManager.sstMap[fromKey]->get_times)) {
+      lock_.Unlock();
+    } else {
+      lock_.Unlock();
+      return;
+    }
+  }
+  uint64_t fromSstId = fromKey / 10000;
+  uint64_t blk_num = fromKey % 10000;
+  if (fromSstId == 0) {
+    fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
+            cloudManager.sstMap[fromKey]->get_times);
+    lock_.Lock();
+    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
+    SstTemp *t = cloudManager.sstMap[fromSstId];
+    cloudManager.sstMap.erase(fromSstId);
+    delete t;
+    lock_.Unlock();
+    return;
+  }
+  std::string old_fname = TableFileName(db_paths, fromSstId, 0);
+  int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
+  if (readfd == -1) {
+    lock_.Lock();
+    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
+    SstTemp *t = cloudManager.sstMap[fromSstId];
+    cloudManager.sstMap.erase(fromSstId);
+    delete t;
+    lock_.Unlock();
+    return;
+  }
+  uint64_t offset = blk_num * 256 * 1024;
+  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
+                                    TokenLimiter::kRead);
+  int ret = pread(readfd, buf_, 256 * 1024, offset);
+  if (ret == -1) {
+    fprintf(stderr, "pread error\n");
+    close(readfd);
+    return;
+  }
+  if (ret != 256 * 1024) {
+    fprintf(stderr, "pwrite error\n");
+    close(readfd);
+    return;
+  }
+  close(readfd);
+  lock_.Lock();  //更新cloudManager ssdManager
+  SstTemp *t = cloudManager.sstMap[fromKey];
+  cloudManager.sstMap.erase(fromKey);
+  ssdManager.sstMap[fromKey] = t;
+  t->sst_buf=new char[256*1024];
+  memcpy(t->sst_buf,buf_,256*1024);
+  if (outKey != 0) {
+    t = ssdManager.sstMap[outKey];
+    lock_mem.Lock();
+    t->freeBuf();
+    lock_mem.Unlock();
+    ssdManager.sstMap.erase(outKey);
+    cloudManager.sstMap[outKey] = t;
+  }
+  // fprintf(stderr, "prefetcher end\n");
+  lock_.Unlock();
+}
 void Prefetcher::_Prefetcher() {
   lock_.Lock();
   // fprintf(stderr, "prefetcher begin\n");
@@ -156,13 +238,12 @@ void Prefetcher::_CaluateSstHeat() {
     }
   }
   // std::vector<uint64_t> delKeys;
-  for(auto it=cloudManager.sstMap.begin();it!=cloudManager.sstMap.end();it++)
-  {
-    if(temp_sst_iotimes.find(it->first)==temp_sst_iotimes.end())
-    {
-      auto p=it->second;
-      auto key=it->first;
-      p->get_times=(p->get_times) * 0.2;
+  for (auto it = cloudManager.sstMap.begin(); it != cloudManager.sstMap.end();
+       it++) {
+    if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
+      auto p = it->second;
+      auto key = it->first;
+      p->get_times = (p->get_times) * 0.2;
       // if(p->get_times<1)
       // {
       //   delKeys.push_back(key);
@@ -176,13 +257,12 @@ void Prefetcher::_CaluateSstHeat() {
   //   delete t;
   //   // cloudManager.sstMap.erase(delKeys[i]);
   // }
-  for(auto it=ssdManager.sstMap.begin();it!=ssdManager.sstMap.end();it++)
-  {
-    if(temp_sst_iotimes.find(it->first)==temp_sst_iotimes.end())
-    {
-      auto p=it->second;
-      auto key=it->first;
-      p->get_times=(p->get_times) * 0.2;
+  for (auto it = ssdManager.sstMap.begin(); it != ssdManager.sstMap.end();
+       it++) {
+    if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
+      auto p = it->second;
+      auto key = it->first;
+      p->get_times = (p->get_times) * 0.2;
     }
   }
   lock_.Unlock();
@@ -195,6 +275,20 @@ size_t Prefetcher::TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
                                         size_t n, char *scratch) {
   static Prefetcher &i = _GetInst();
   return i._TryGetFromPrefetcher(sst_id, offset, n, scratch);
+}
+size_t Prefetcher::_PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
+                            char* scratch)
+{
+  lock_mem.Lock();
+  size_t errorFlag = n + 1;
+  SstTemp *t=ssdManager.sstMap[key];
+  if(t->sst_buf==nullptr)
+  {
+    return errorFlag;
+  }
+  memcpy(scratch,t->sst_buf+offset,n);
+  lock_mem.Unlock();
+  return 0;
 }
 size_t Prefetcher::_PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
                                       char *scratch) {
@@ -349,6 +443,17 @@ void Prefetcher::_Init() {
     exit(1);
   }
 
+  hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_read);
+  hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_write);
+  readiops = 0;
+  writeiops = 0;
+  tiktoks = 0;
+  logFp_read = std::fopen("./ssd_rlat.log", "w+");
+  logFp_write = std::fopen("./ssd_wlat.log", "w+");
+  fprintf(logFp_read, "#type mean       95th    99th    99.99th    IOPS\n");
+  fprintf(logFp_write, "#type mean       95th    99th    99.99th    IOPS\n");
+  tiktok_start = now();
+
   std::thread t(caluateSstHeatThread);
   t.detach();
 
@@ -385,6 +490,60 @@ void Prefetcher::_SstRead(uint64_t sst_id, uint64_t offset, size_t size,
     sst_iotimes[key + 1]++;
   }
   lock_sst_io.Unlock();
+}
+
+void Prefetcher::RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
+{
+  static Prefetcher &i = _GetInst();
+  i._RecordTime(op, tx_xtime);
+}
+
+void Prefetcher::latency_hiccup_read(uint64_t iiops) {
+  // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
+  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+          hdr_mean(hdr_last_1s_read),
+          hdr_value_at_percentile(hdr_last_1s_read, 95),
+          hdr_value_at_percentile(hdr_last_1s_read, 99),
+          hdr_value_at_percentile(hdr_last_1s_read, 99.99), iiops);
+  hdr_reset(hdr_last_1s_read);
+  fflush(logFp_read);
+}
+
+void Prefetcher::latency_hiccup_write(uint64_t iiops) {
+  // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
+  fprintf(logFp_write, "write %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+          hdr_mean(hdr_last_1s_write),
+          hdr_value_at_percentile(hdr_last_1s_write, 95),
+          hdr_value_at_percentile(hdr_last_1s_write, 99),
+          hdr_value_at_percentile(hdr_last_1s_write, 99.99), iiops);
+  hdr_reset(hdr_last_1s_write);
+  fflush(logFp_write);
+}
+void Prefetcher::_RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
+{
+  lock_rw.Lock();
+  if (tx_xtime > 3600000000) {
+    fprintf(stderr, "too large tx_xtime");
+    return;
+  }
+
+  if (op == 1) {
+    hdr_record_value(hdr_last_1s_read, tx_xtime);
+    readiops++;
+  } else if (op == 2) {
+    hdr_record_value(hdr_last_1s_write, tx_xtime);
+    writeiops++;
+  }
+  tiktoks = now() - tiktok_start;
+  if (tiktoks >= 1000000000) {
+    latency_hiccup_read(readiops);
+    latency_hiccup_write(writeiops);
+    tiktok_start = now();
+    readiops = 0;
+    writeiops = 0;
+    tiktoks = 0;
+  }
+  lock_rw.Unlock();
 }
 
 }  // namespace rocksdb

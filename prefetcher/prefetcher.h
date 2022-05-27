@@ -16,6 +16,9 @@
 #include <set>
 #include <thread>
 #include <unordered_map>
+#include <cstring>
+
+#include <hdr/hdr_histogram.h>
 
 #include "db/db_impl/db_impl.h"
 #include "db/event_helpers.h"
@@ -35,6 +38,7 @@ class SstTemp {
  public:
   uint64_t sst_id_blk;
   uint32_t get_times;  //访问次数
+  char *sst_buf=nullptr;
   SstTemp(uint64_t sst_id_blk_) {
     sst_id_blk = sst_id_blk_;
     get_times = 1;
@@ -43,6 +47,22 @@ class SstTemp {
   SstTemp(uint64_t sst_id_blk_, uint32_t get_times_) {
     sst_id_blk = sst_id_blk_;
     get_times = get_times_;
+  }
+  ~SstTemp()
+  {
+    if(sst_buf!=nullptr)
+    {
+      delete []sst_buf;
+      sst_buf=nullptr;
+    }
+  }
+  void freeBuf()
+  {
+    if(sst_buf!=nullptr)
+    {
+      delete []sst_buf;
+      sst_buf=nullptr;
+    }
   }
 };
 
@@ -106,7 +126,28 @@ class Prefetcher {
   void _Init();
   static int64_t now();
 
+  struct hdr_histogram *hdr_last_1s_read = NULL;
+  struct hdr_histogram *hdr_last_1s_write = NULL;
+  FILE *logFp_read = nullptr;
+  FILE *logFp_write = nullptr;
+  int readiops = 0;
+  int writeiops = 0;
+  uint64_t tiktoks = 0;
+  uint64_t tiktok_start = 0;
+  static void RecordTime(int op, uint64_t tx_xtime);
+  void _RecordTime(int op, uint64_t tx_xtime);
+  void latency_hiccup_read(uint64_t iops);
+  void latency_hiccup_write(uint64_t iops);
+
   ~Prefetcher() {
+    if(logFp_read!=nullptr)
+    {
+      fclose(logFp_read);
+      fclose(logFp_write);
+      free(hdr_last_1s_read);
+      free(hdr_last_1s_write);
+    }
+    
     if (buf_ != nullptr) {
       free(buf_);
       buf_ = nullptr;
@@ -120,8 +161,12 @@ class Prefetcher {
   mutable port::Mutex lock_;        // synchronization primitive
   mutable port::Mutex lock_sst_io;  // synchronization primitive
 
-  mutable port::Mutex lockCloud;  // synchronization primitive
-  mutable port::Mutex lockSsd;    // synchronization primitive
+
+  mutable port::Mutex lock_rw;        // synchronization primitive
+
+  mutable port::Mutex lock_mem;        // synchronization primitive
+
+
 
   std::unordered_map<uint64_t, int>
       sst_iotimes;  //统计一秒内的sst块(256k)的io次数 key : sstidk
@@ -138,6 +183,8 @@ class Prefetcher {
   static void Prefetche();
   void _Prefetcher();
 
+  void _PrefetcherToMem();
+
   static size_t TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset, size_t n,
                                      char* scratch);
   size_t _TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset, size_t n,
@@ -147,5 +194,9 @@ class Prefetcher {
                             char* scratch);
   size_t _PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
                              char* scratch);
+
+
+  size_t _PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
+                            char* scratch);
 };
 }  // namespace rocksdb
