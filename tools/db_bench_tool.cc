@@ -2000,6 +2000,29 @@ class Stats {
                     hist_[kReadHiccup]->Percentile(99.0));
             fflush(fp_op_hiccup_report);
             hist_[kReadHiccup]->Clear();
+
+
+            // fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
+            //         (now - start_) / 1000000.0,
+            //         (readdone_ - last_report_readdone_) /
+            //             (usecs_since_last / 1000000.0));
+            // fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
+            //         (now - start_) / 1000000.0,
+            //         (readdone_ - last_report_readdone_) /
+            //             (usecs_since_last / 1000000.0));
+            // fflush(fp_op_hiccup_report);
+            // fprintf(stderr, "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f\n",
+            //         hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+            //         hist_[kReadHiccup]->Average(),
+            //         hist_[kReadHiccup]->Percentile(50.0),hist_[kReadHiccup]->Percentile(75.0)
+            //         ,hist_[kReadHiccup]->Percentile(90.0));
+            // fprintf(fp_op_hiccup_report, "read %8ld   %8ld   %8.0f   %8.0f    %8.0f   %8.0f\n",
+            //         hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+            //         hist_[kReadHiccup]->Average(),
+            //         hist_[kReadHiccup]->Percentile(50.0),hist_[kReadHiccup]->Percentile(75.0)
+            //         ,hist_[kReadHiccup]->Percentile(90.0));
+            // fflush(fp_op_hiccup_report);
+            // hist_[kReadHiccup]->Clear();
           }
 
           // fprintf(stderr,
@@ -3822,10 +3845,10 @@ class Benchmark {
 
     assert(db_.db == nullptr);
 
-    // options.db_paths = {
-    //     {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
-    //     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
-    // };
+    options.db_paths = {
+        {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+        {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
+    };
 
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
@@ -6186,6 +6209,8 @@ class Benchmark {
     uint64_t interval_us_in_period_;
     uint64_t base_time_us_;
 
+    uint64_t init_time_us_;
+
    public:
     SineRateGenerator(double sine_a, double sine_b, double sine_c,
                       double sine_d, int sine_mix_rate_interval_milliseconds)
@@ -6199,7 +6224,8 @@ class Benchmark {
           period_total_req_(0),
           period_req_count_(0),
           interval_us_in_period_(0),
-          base_time_us_(FLAGS_env->NowMicros()) {
+          base_time_us_(0),
+          init_time_us_(FLAGS_env->NowMicros()) {
       {
         period_total_req_ = CalcPeroidReqCount(
             double(base_time_us_ +
@@ -6244,14 +6270,14 @@ class Benchmark {
     }
 
     uint64_t CalcReqSendMicros() {
-      return base_time_us_ +
+      return init_time_us_ +
              period_count_ * sine_mix_rate_interval_microseconds_ +
              period_req_count_ * interval_us_in_period_;
     }
   };
 
   void MixGraph4(ThreadState* thread) {
-    fprintf(stderr, "MixGraph2\n");
+    fprintf(stderr, "MixGraph4\n");
     ReadOptions options(FLAGS_verify_checksum, true);
     int64_t gets = 0;
     int64_t puts = 0;
@@ -6332,6 +6358,7 @@ class Benchmark {
       }
       // Start the query
       if (query_type == 0) {
+        // thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kRead);
         thread->stats.ResetLastOpTime();
         // the Get query
         gets++;
@@ -6352,10 +6379,11 @@ class Benchmark {
           fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
           abort();
         }
-        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
-        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kRead);
+        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+        // thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kRead);
 
       } else if (query_type == 1) {
+        // thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kWrite);
         thread->stats.ResetLastOpTime();
         // the Put query
         puts++;
@@ -6375,8 +6403,8 @@ class Benchmark {
           fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           exit(1);
         }
-        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
-        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kWrite);
+        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
+        // thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kWrite);
 
       } else if (query_type == 2) {
         thread->stats.ResetLastOpTime();
@@ -6406,8 +6434,8 @@ class Benchmark {
           }
           delete single_iter;
         }
-        // thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kSeek);
-        thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kSeek);
+        thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kSeek);
+        // thread->stats.FinishedOpsQUEUES(db_with_cfh, db_with_cfh->db, 1,send_us, kSeek);
       }
     }
     char msg[256];

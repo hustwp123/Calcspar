@@ -29,6 +29,7 @@ void prefetchThread()  //统计sst热度线程
 void Prefetcher::Prefetche() {
   static Prefetcher &i = _GetInst();
   i._Prefetcher();
+  // i._PrefetcherToMem();
 }
 
 void Prefetcher::CaluateSstHeat() {
@@ -78,6 +79,7 @@ void Prefetcher::_PrefetcherToMem() {
   int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
   if (readfd == -1) {
     lock_.Lock();
+
     // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
     SstTemp *t = cloudManager.sstMap[fromSstId];
     cloudManager.sstMap.erase(fromSstId);
@@ -94,27 +96,43 @@ void Prefetcher::_PrefetcherToMem() {
     close(readfd);
     return;
   }
-  if (ret != 256 * 1024) {
-    fprintf(stderr, "pwrite error\n");
-    close(readfd);
-    return;
-  }
   close(readfd);
   lock_.Lock();  //更新cloudManager ssdManager
   SstTemp *t = cloudManager.sstMap[fromKey];
+
+  char * temp=nullptr;
+  if(!mems.empty())
+  {
+    temp=mems[mems.size()-1];
+    mems.pop_back();
+  }
+  else
+  {
+    temp=new char[256*1024];
+  }
+  memcpy(temp, buf_, ret);
+  lock_mem.Lock();
+  sst_blocks[fromKey]=temp; 
+  lock_mem.Unlock();
+
   cloudManager.sstMap.erase(fromKey);
   ssdManager.sstMap[fromKey] = t;
-  t->sst_buf=new char[256*1024];
-  memcpy(t->sst_buf,buf_,256*1024);
   if (outKey != 0) {
     t = ssdManager.sstMap[outKey];
-    lock_mem.Lock();
-    t->freeBuf();
-    lock_mem.Unlock();
     ssdManager.sstMap.erase(outKey);
     cloudManager.sstMap[outKey] = t;
+    
+    temp=sst_blocks[outKey];
+    lock_mem.Lock();
+    if(temp!=nullptr)
+    {
+      sst_blocks.erase(outKey);
+      mems.push_back(temp);
+    } 
+    lock_mem.Unlock();
   }
   // fprintf(stderr, "prefetcher end\n");
+  
   lock_.Unlock();
 }
 void Prefetcher::_Prefetcher() {
@@ -237,26 +255,14 @@ void Prefetcher::_CaluateSstHeat() {
       cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second * 0.8);
     }
   }
-  // std::vector<uint64_t> delKeys;
   for (auto it = cloudManager.sstMap.begin(); it != cloudManager.sstMap.end();
        it++) {
     if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
       auto p = it->second;
       auto key = it->first;
       p->get_times = (p->get_times) * 0.2;
-      // if(p->get_times<1)
-      // {
-      //   delKeys.push_back(key);
-      // }
     }
   }
-  // for(int i=0;i<delKeys.size();i++)
-  // {
-  //   SstTemp *t = cloudManager.sstMap[delKeys[i]];
-  //   cloudManager.sstMap.erase(delKeys[i]);
-  //   delete t;
-  //   // cloudManager.sstMap.erase(delKeys[i]);
-  // }
   for (auto it = ssdManager.sstMap.begin(); it != ssdManager.sstMap.end();
        it++) {
     if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
@@ -277,18 +283,18 @@ size_t Prefetcher::TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
   return i._TryGetFromPrefetcher(sst_id, offset, n, scratch);
 }
 size_t Prefetcher::_PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
-                            char* scratch)
-{
+                                      char *scratch) {
   lock_mem.Lock();
+  char* temp=sst_blocks[key];
   size_t errorFlag = n + 1;
-  SstTemp *t=ssdManager.sstMap[key];
-  if(t->sst_buf==nullptr)
-  {
+  if (temp==nullptr) {
+    fprintf(stderr, "err\n");
     return errorFlag;
   }
-  memcpy(scratch,t->sst_buf+offset,n);
+  size_t left = 0;
+  memcpy(scratch, temp + offset, n );
   lock_mem.Unlock();
-  return 0;
+  return left;
 }
 size_t Prefetcher::_PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
                                       char *scratch) {
@@ -393,30 +399,16 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
   if (offset + n > 256 * 1024) {
     // fprintf(stderr, "need 2 more blocks\n");
     return errorFlag;
-  }
-  // else if (offset + n > 256 * 1024) {
-  //   lock_.Lock();
-  //   if (ssdManager.sstMap.find(key) == ssdManager.sstMap.end() ) {
-  //     lock_.Unlock();
-  //     // fprintf(stderr,"2 blocks not found\n");
-  //     return errorFlag;
-  //   }
-  //   if (ssdManager.sstMap.find(key+1) == ssdManager.sstMap.end() ) {
-  //     lock_.Unlock();
-  //     fprintf(stderr,"2 blocks not found\n");
-  //     return errorFlag;
-  //   }
-  //   lock_.Unlock();
-  //   return _PrefetcherTwoFiles(key,offset,n,scratch);
-  // }
-  else {
+  } else {
     // lock_.Lock();
     if (ssdManager.sstMap.find(key) == ssdManager.sstMap.end()) {
       // lock_.Unlock();
       return errorFlag;
     }
     // lock_.Unlock();
+
     return _PrefetcherOneFile(key, offset, n, scratch);
+    // return _PrefetcherFromMem(key, offset, n, scratch);
   }
 }
 
@@ -429,6 +421,38 @@ void Prefetcher::Init() {
   static Prefetcher &i = _GetInst();
   i._Init();
 }
+
+void Prefetcher::Init2() {
+  printf("Prefetcher Init2 \n");
+  static Prefetcher &i = _GetInst();
+  i._Init2();
+}
+
+void Prefetcher::_Init2() {
+  fprintf(stderr, "Prefetcher Init\n");
+  if (inited) {
+    return;
+  }
+  inited = true;
+
+  if (logRWlat) {
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_read);
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_write);
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_size);
+    readiops = 0;
+    writeiops = 0;
+    tiktoks = 0;
+    logFp_read = std::fopen("./ssd_rlat.log", "w+");
+    logFp_write = std::fopen("./ssd_wlat.log", "w+");
+    logFp_size =std::fopen("./ssd_size.log", "w+");
+    fprintf(logFp_read, "#type mean   50th    95th    99th    99.99th    IOPS\n");
+    fprintf(logFp_write, "#type mean  50th     95th    99th    99.99th    IOPS\n");
+    fprintf(logFp_size, "#type mean   50th    95th    99th    99.99th ");
+    tiktok_start = now();
+  }
+}
+
+
 void Prefetcher::_Init() {
   fprintf(stderr, "Prefetcher Init\n");
   if (inited) {
@@ -443,16 +467,21 @@ void Prefetcher::_Init() {
     exit(1);
   }
 
-  hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_read);
-  hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_write);
-  readiops = 0;
-  writeiops = 0;
-  tiktoks = 0;
-  logFp_read = std::fopen("./ssd_rlat.log", "w+");
-  logFp_write = std::fopen("./ssd_wlat.log", "w+");
-  fprintf(logFp_read, "#type mean       95th    99th    99.99th    IOPS\n");
-  fprintf(logFp_write, "#type mean       95th    99th    99.99th    IOPS\n");
-  tiktok_start = now();
+  if (logRWlat) {
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_read);
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_write);
+    hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_size);
+    readiops = 0;
+    writeiops = 0;
+    tiktoks = 0;
+    logFp_read = std::fopen("./ssd_rlat.log", "w+");
+    logFp_write = std::fopen("./ssd_wlat.log", "w+");
+    logFp_size =std::fopen("./ssd_size.log", "w+");
+    fprintf(logFp_read, "#type mean   50th    95th    99th    99.99th    IOPS\n");
+    fprintf(logFp_write, "#type mean  50th     95th    99th    99.99th    IOPS\n");
+    fprintf(logFp_size, "#type mean   50th    95th    99th    99.99th ");
+    tiktok_start = now();
+  }
 
   std::thread t(caluateSstHeatThread);
   t.detach();
@@ -492,16 +521,18 @@ void Prefetcher::_SstRead(uint64_t sst_id, uint64_t offset, size_t size,
   lock_sst_io.Unlock();
 }
 
-void Prefetcher::RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
+void Prefetcher::RecordTime(int op, uint64_t tx_xtime,size_t size)  // op : 1read 2write
 {
   static Prefetcher &i = _GetInst();
-  i._RecordTime(op, tx_xtime);
+  i._RecordTime(op, tx_xtime,size);
 }
+
 
 void Prefetcher::latency_hiccup_read(uint64_t iiops) {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_read),
+          hdr_value_at_percentile(hdr_last_1s_read, 50),
           hdr_value_at_percentile(hdr_last_1s_read, 95),
           hdr_value_at_percentile(hdr_last_1s_read, 99),
           hdr_value_at_percentile(hdr_last_1s_read, 99.99), iiops);
@@ -511,16 +542,33 @@ void Prefetcher::latency_hiccup_read(uint64_t iiops) {
 
 void Prefetcher::latency_hiccup_write(uint64_t iiops) {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_write, "write %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_write, "write %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_write),
+          hdr_value_at_percentile(hdr_last_1s_write, 50),
           hdr_value_at_percentile(hdr_last_1s_write, 95),
           hdr_value_at_percentile(hdr_last_1s_write, 99),
           hdr_value_at_percentile(hdr_last_1s_write, 99.99), iiops);
   hdr_reset(hdr_last_1s_write);
   fflush(logFp_write);
 }
-void Prefetcher::_RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
+
+void Prefetcher::latency_hiccup_size() {
+  // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
+  fprintf(logFp_size, "size %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+          hdr_mean(hdr_last_1s_size),
+          hdr_value_at_percentile(hdr_last_1s_size, 50),
+          hdr_value_at_percentile(hdr_last_1s_size, 95),
+          hdr_value_at_percentile(hdr_last_1s_size, 99),
+          hdr_value_at_percentile(hdr_last_1s_size, 99.99));
+  hdr_reset(hdr_last_1s_size);
+  fflush(logFp_size);
+}
+void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,size_t size)  // op : 1read 2write
 {
+  if(!logRWlat)
+  {
+    return;
+  }
   lock_rw.Lock();
   if (tx_xtime > 3600000000) {
     fprintf(stderr, "too large tx_xtime");
@@ -529,6 +577,7 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
 
   if (op == 1) {
     hdr_record_value(hdr_last_1s_read, tx_xtime);
+    hdr_record_value(hdr_last_1s_size, size);
     readiops++;
   } else if (op == 2) {
     hdr_record_value(hdr_last_1s_write, tx_xtime);
@@ -538,6 +587,7 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
   if (tiktoks >= 1000000000) {
     latency_hiccup_read(readiops);
     latency_hiccup_write(writeiops);
+    latency_hiccup_size();
     tiktok_start = now();
     readiops = 0;
     writeiops = 0;
@@ -545,5 +595,6 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime)  // op : 1read 2write
   }
   lock_rw.Unlock();
 }
+
 
 }  // namespace rocksdb

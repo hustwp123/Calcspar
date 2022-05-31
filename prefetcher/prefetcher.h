@@ -38,7 +38,6 @@ class SstTemp {
  public:
   uint64_t sst_id_blk;
   uint32_t get_times;  //访问次数
-  char *sst_buf=nullptr;
   SstTemp(uint64_t sst_id_blk_) {
     sst_id_blk = sst_id_blk_;
     get_times = 1;
@@ -50,19 +49,6 @@ class SstTemp {
   }
   ~SstTemp()
   {
-    if(sst_buf!=nullptr)
-    {
-      delete []sst_buf;
-      sst_buf=nullptr;
-    }
-  }
-  void freeBuf()
-  {
-    if(sst_buf!=nullptr)
-    {
-      delete []sst_buf;
-      sst_buf=nullptr;
-    }
   }
 };
 
@@ -83,6 +69,7 @@ struct CmpByValue {
 class SstManager {
  public:
   std::unordered_map<uint64_t, SstTemp*> sstMap;
+  
   std::vector<PAIR> sortedV;
   bool isSorted = false;
   void sortSst() {
@@ -119,33 +106,47 @@ class SstManager {
 
 class Prefetcher {
  public:
+  std::unordered_map<uint64_t, char*> sst_blocks;
+  std::vector<char*> mems;
+
   static Prefetcher& _GetInst();
   char* buf_ = nullptr;
   bool inited = false;
+
+  bool logRWlat=true;
+
   static void Init();
   void _Init();
+  static void Init2();
+  void _Init2();
   static int64_t now();
 
   struct hdr_histogram *hdr_last_1s_read = NULL;
   struct hdr_histogram *hdr_last_1s_write = NULL;
+  struct hdr_histogram *hdr_last_1s_size = NULL;
   FILE *logFp_read = nullptr;
   FILE *logFp_write = nullptr;
+  FILE *logFp_size = nullptr;
   int readiops = 0;
   int writeiops = 0;
   uint64_t tiktoks = 0;
   uint64_t tiktok_start = 0;
-  static void RecordTime(int op, uint64_t tx_xtime);
-  void _RecordTime(int op, uint64_t tx_xtime);
+  static void RecordTime(int op, uint64_t tx_xtime,size_t size);
+  void _RecordTime(int op, uint64_t tx_xtime,size_t size);
   void latency_hiccup_read(uint64_t iops);
   void latency_hiccup_write(uint64_t iops);
+  void latency_hiccup_size();
 
   ~Prefetcher() {
     if(logFp_read!=nullptr)
     {
       fclose(logFp_read);
       fclose(logFp_write);
+      fclose(logFp_size);
+
       free(hdr_last_1s_read);
       free(hdr_last_1s_write);
+      free(hdr_last_1s_size);
     }
     
     if (buf_ != nullptr) {

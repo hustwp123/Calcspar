@@ -76,7 +76,7 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
     uint64_t begin=Prefetcher::now();
     ssize_t done = write(fd, src, bytes_to_write);
     uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(2,(end-begin)/1000);
+    Prefetcher::RecordTime(2,(end-begin)/1000,left);
     if (done < 0) {
       if (errno == EINTR) {
         continue;
@@ -102,7 +102,7 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
     uint64_t begin=Prefetcher::now();
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
     uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(2,(end-begin)/1000);
+    Prefetcher::RecordTime(2,(end-begin)/1000,bytes_to_write);
     if (done < 0) {
       if (errno == EINTR) {
         continue;
@@ -457,7 +457,7 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
     uint64_t begin=Prefetcher::now();
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(1,(end-begin)/1000);
+    Prefetcher::RecordTime(1,(end-begin)/1000,left);
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
         continue;
