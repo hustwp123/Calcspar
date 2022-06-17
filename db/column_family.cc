@@ -34,6 +34,7 @@
 #include "table/merging_iterator.h"
 #include "util/autovector.h"
 #include "util/compression.h"
+#include "util/token_limiter.h"
 
 namespace rocksdb {
 
@@ -733,6 +734,28 @@ WriteStallCondition ColumnFamilyData::RecalculateWriteStallConditions(
         vstorage->estimated_compaction_needed_bytes(), mutable_cf_options);
     write_stall_condition = write_stall_condition_and_cause.first;
     auto write_stall_cause = write_stall_condition_and_cause.second;
+
+    //wp
+    if(write_stall_condition!=WriteStallCondition::kNormal)
+    {
+      if(write_stall_cause==WriteStallCause::kMemtableLimit
+      ||write_stall_cause==WriteStallCause::kL0FileCountLimit)
+      {
+        //提升Flush优先级 时间片加0.1秒
+        TokenLimiter::TunePriority(Env::IO_SRC_FLUSH_L0COMP,true);
+      }
+      else
+      {
+        //提升compaction优先级 时间片加0.1秒
+        TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,true);
+      }
+    }
+    else
+    {
+      //降低Flush优先级和compaction优先级 
+      TokenLimiter::TunePriority(Env::IO_SRC_FLUSH_L0COMP,false);
+      TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,false);
+    }
 
     bool was_stopped = write_controller->IsStopped();
     bool needed_delay = write_controller->NeedsDelay();

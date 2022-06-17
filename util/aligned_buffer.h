@@ -61,7 +61,18 @@ class AlignedBuffer {
   size_t cursize_;
   char* bufstart_;
 
+  //wp
+  // char* wpbuf_=nullptr; 
+
 public:
+  // ~AlignedBuffer()
+  // {
+  //   if(wpbuf_!=nullptr)
+  //   {
+  //     // fprintf(stderr,"free wpbuf_");
+  //     free(wpbuf_);
+  //   }
+  // }
   AlignedBuffer()
     : alignment_(),
       capacity_(0),
@@ -167,6 +178,48 @@ public:
     capacity_ = new_capacity;
     buf_.reset(new_buf);
   }
+
+  // void WpAllocateNewBuffer(size_t requested_capacity, bool copy_data = false,
+  //                        uint64_t copy_offset = 0, size_t copy_len = 0) {
+  //   assert(alignment_ > 0);
+  //   assert((alignment_ & (alignment_ - 1)) == 0);
+
+  //   copy_len = copy_len > 0 ? copy_len : cursize_;
+  //   if (copy_data && requested_capacity < copy_len) {
+  //     // If we are downsizing to a capacity that is smaller than the current
+  //     // data in the buffer -- Ignore the request.
+  //     return;
+  //   }
+
+  //   size_t new_capacity = Roundup(requested_capacity, alignment_);
+  //   // char* new_buf = new char[new_capacity + alignment_];
+  //   char* new_buf=nullptr;
+  //   int ret = posix_memalign((void **)&new_buf, alignment_, new_capacity + alignment_);
+  //   if (ret) {
+  //     fprintf(stderr, "posix_memalign failed");
+  //     exit(1);
+  //   }
+  //   char* new_bufstart = reinterpret_cast<char*>(
+  //       (reinterpret_cast<uintptr_t>(new_buf) + (alignment_ - 1)) &
+  //       ~static_cast<uintptr_t>(alignment_ - 1));
+
+  //   if (copy_data) {
+  //     assert(bufstart_ + copy_offset + copy_len <= bufstart_ + cursize_);
+  //     memcpy(new_bufstart, bufstart_ + copy_offset, copy_len);
+  //     cursize_ = copy_len;
+  //   } else {
+  //     cursize_ = 0;
+  //   }
+
+  //   bufstart_ = new_bufstart;
+  //   capacity_ = new_capacity;
+  //   if(wpbuf_)
+  //   {
+  //     free(wpbuf_);
+  //   }
+  //   wpbuf_=new_buf;
+  //   // buf_.reset(new_buf);
+  // }
 
   // Append to the buffer.
   //

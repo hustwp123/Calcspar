@@ -30,9 +30,9 @@ void TokenLimiter::SetDefaultInstance(std::unique_ptr<TokenLimiter> limiter) {
   default_limiter = std::move(limiter);
 }
 
-void TokenLimiter::RequestDefaultToken(Env::IOSource io_src, IOType io_type) {
+void TokenLimiter::RequestDefaultToken(Env::IOSource io_src, IOType io_type,int32_t n) {
   if (default_limiter != nullptr) {
-    default_limiter->RequestToken(io_src, io_type);
+    default_limiter->RequestToken(io_src, io_type,n);
   }
 }
 
@@ -67,13 +67,28 @@ std::string TokenLimiter::IOSourceToString(Env::IOSource io_src) {
   }
 }
 
+bool TokenLimiter::ManualTune(Env::IOSource io_src,
+                              uint64_t wait_threshold_us) {
+  if (default_limiter != nullptr) {
+    return default_limiter->Tune(io_src, wait_threshold_us);
+  }
+  return false;
+}
+
+void TokenLimiter::TunePriority(Env::IOSource io_src,
+                              bool add) {
+  if (default_limiter != nullptr) {
+    default_limiter->TunePriority_(io_src, add);
+  }
+}
+
 // ----------------------------------------------------------------------------
 
 TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{900 * 1000, 700 * 1000, 0, 0},
+      wait_threshold_us_{900 * 1000, 800 * 1000, 500 * 1000, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),
@@ -104,7 +119,7 @@ TokenLimiter::~TokenLimiter() {
   }
 }
 
-void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type) {
+void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type,int32_t n) {
   assert(io_src >= Env::IOSource::IO_SRC_PREFETCH &&
          io_src <= Env::IOSource::IO_SRC_DEFAULT);
   assert(io_type >= TokenLimiter::IOType::kRead &&
@@ -124,14 +139,14 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type) {
   RefillIfNeeded(arrive_sec);
   // ?should we design to signal to the waiter here
 
-  if (available_tokens_ > 0 &&
+  if (available_tokens_ >= n &&
       arrive_us >= arrive_sec_in_us + wait_threshold_us_[io_src] &&
       queues_[io_src].empty()) {
-    available_tokens_--;
+    available_tokens_-=n;
     return;
   }
 
-  Req req(&request_mutex_);
+  Req req(&request_mutex_,n);
   queues_[io_src].push_back(&req);
 
   do {
@@ -175,7 +190,6 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type) {
 
 bool TokenLimiter::RefillIfNeeded(uint64_t now_sec) {
   if (now_sec >= next_refill_sec_) {
-    TunePrefetch();
     // available_tokens_ >= 0, so fill make it tokens_per_sec_
     available_tokens_ = tokens_per_sec_;
     next_refill_sec_ = now_sec + 1;
@@ -210,25 +224,74 @@ void TokenLimiter::DispatchToken(uint64_t now_us) {
     if (now_us < now_sec_in_us + wait_threshold_us_[i]) {
       break;
     }
+    std::vector<Req*> no_enough_tokens_queue;
     while (!queues_[i].empty() && available_tokens_ > 0) {
       Req* next_req = queues_[i].front();
-      available_tokens_--;
-      next_req->granted_ = true;
       queues_[i].pop_front();
-      next_req->cv_.Signal();
+      if (next_req->n_ > available_tokens_) {
+        no_enough_tokens_queue.push_back(next_req);
+      } else {
+        available_tokens_ -= next_req->n_;
+        next_req->granted_ = true;
+        next_req->cv_.Signal();
+      }
     }
+    queues_[i].insert(queues_[i].begin(), no_enough_tokens_queue.begin(),
+                      no_enough_tokens_queue.end());
   }
 }
 
-void TokenLimiter::TunePrefetch() {
-  uint64_t prev = wait_threshold_us_[Env::IO_SRC_PREFETCH];
-  if (available_tokens_ > 0) {
-    wait_threshold_us_[Env::IO_SRC_PREFETCH] = std::max(
-        prev - 50 * 1000, wait_threshold_us_[Env::IO_SRC_PREFETCH + 1]);
-  } else {
-    wait_threshold_us_[Env::IO_SRC_PREFETCH] =
-        std::min(prev + 50 * 1000, (uint64_t)900 * 1000);
+bool TokenLimiter::Tune(Env::IOSource io_src, uint64_t wait_threshold_us) {
+  MutexLock g(&request_mutex_);
+  if (io_src >= Env::IO_SRC_DEFAULT || io_src < Env::IO_SRC_PREFETCH) {
+    return false;
   }
+
+  // 0 <= io_src < Env::IO_SRC_DEFAULT
+
+  if (io_src + 1 != Env::IO_SRC_DEFAULT &&
+      wait_threshold_us < wait_threshold_us_[io_src + 1]) {
+    return false;
+  }
+  if (io_src != 0 && wait_threshold_us > wait_threshold_us_[io_src - 1]) {
+    return false;
+  }
+  wait_threshold_us_[io_src] = wait_threshold_us;
+  return true;
+}
+
+void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
+  if(!add&&wait_threshold_us_[io_src]==limits[io_src])
+  {
+    fprintf(stderr,"%d priority now=%lu\n",io_src,wait_threshold_us_[io_src]);
+    return;
+  }
+  MutexLock g(&request_mutex_);
+  if (io_src >= Env::IO_SRC_DEFAULT || io_src < Env::IO_SRC_PREFETCH) {
+    return;
+  }
+  if(add&&wait_threshold_us_[io_src]>0)
+  {
+    wait_threshold_us_[io_src]=wait_threshold_us_[io_src]-100*1000;
+    fprintf(stderr,"%d priority now=%lu\n",io_src,wait_threshold_us_[io_src]);
+  }
+  else
+  {
+    wait_threshold_us_[io_src]=std::min(wait_threshold_us_[io_src]+100*1000,limits[io_src]);
+    fprintf(stderr,"%d priority now=%lu\n",io_src,wait_threshold_us_[io_src]);
+  }
+
+  // 0 <= io_src < Env::IO_SRC_DEFAULT
+
+  // if (io_src + 1 != Env::IO_SRC_DEFAULT &&
+  //     wait_threshold_us_[io_src]t_threshold_us < wait_threshold_us_[io_src + 1]) {
+  //   return false;
+  // }
+  // if (io_src != 0 && wait_threshold_us > wait_threshold_us_[io_src - 1]) {
+  //   return false;
+  // }
+  // wait_threshold_us_[io_src] = wait_threshold_us;
+  // return true;
 }
 
 }  // namespace rocksdb

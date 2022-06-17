@@ -106,6 +106,8 @@ class SstManager {
 
 class Prefetcher {
  public:
+  uint64_t hit_times=0;
+  uint64_t all_times=0;
   std::unordered_map<uint64_t, char*> sst_blocks;
   std::vector<char*> mems;
 
@@ -138,8 +140,10 @@ class Prefetcher {
   void latency_hiccup_size();
 
   ~Prefetcher() {
+    fprintf(stderr,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
     if(logFp_read!=nullptr)
     {
+      fprintf(logFp_size,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
       fclose(logFp_read);
       fclose(logFp_write);
       fclose(logFp_size);
@@ -156,7 +160,7 @@ class Prefetcher {
     fprintf(stderr, "~Prefetcher\n");
   }
 
-  const size_t MAXSSTNUM = 2900;  // ssd中缓存的sst_blk的最大数目
+  const size_t MAXSSTNUM = 20*1036;  // ssd中缓存的sst_blk的最大数目
 
   Env* env_ = nullptr;
   mutable port::Mutex lock_;        // synchronization primitive

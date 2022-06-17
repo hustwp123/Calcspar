@@ -393,6 +393,7 @@ size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
 }
 size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
                                          size_t n, char *scratch) {
+  all_times++;
   size_t errorFlag = n + 1;
   uint64_t key = sst_id * 10000 + offset / (256 * 1024);
   offset = offset % (256 * 1024);
@@ -406,9 +407,14 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
       return errorFlag;
     }
     // lock_.Unlock();
-
-    return _PrefetcherOneFile(key, offset, n, scratch);
-    // return _PrefetcherFromMem(key, offset, n, scratch);
+    size_t re=errorFlag;
+    re=_PrefetcherOneFile(key, offset, n, scratch);
+    // re=_PrefetcherFromMem(key, offset, n, scratch);
+    if(re!=errorFlag)
+    {
+      hit_times++;
+    }
+    return re;
   }
 }
 
@@ -445,9 +451,9 @@ void Prefetcher::_Init2() {
     logFp_read = std::fopen("./ssd_rlat.log", "w+");
     logFp_write = std::fopen("./ssd_wlat.log", "w+");
     logFp_size =std::fopen("./ssd_size.log", "w+");
-    fprintf(logFp_read, "#type mean   50th    95th    99th    99.99th    IOPS\n");
-    fprintf(logFp_write, "#type mean  50th     95th    99th    99.99th    IOPS\n");
-    fprintf(logFp_size, "#type mean   50th    95th    99th    99.99th ");
+    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    fprintf(logFp_write, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    fprintf(logFp_size, "#type mean   25th   50th   75th    90th    99th    99.9th ");
     tiktok_start = now();
   }
 }
@@ -477,9 +483,9 @@ void Prefetcher::_Init() {
     logFp_read = std::fopen("./ssd_rlat.log", "w+");
     logFp_write = std::fopen("./ssd_wlat.log", "w+");
     logFp_size =std::fopen("./ssd_size.log", "w+");
-    fprintf(logFp_read, "#type mean   50th    95th    99th    99.99th    IOPS\n");
-    fprintf(logFp_write, "#type mean  50th     95th    99th    99.99th    IOPS\n");
-    fprintf(logFp_size, "#type mean   50th    95th    99th    99.99th ");
+    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    fprintf(logFp_write, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    fprintf(logFp_size, "#type mean   25th   50th   75th    90th    99th    99.9th ");
     tiktok_start = now();
   }
 
@@ -530,36 +536,42 @@ void Prefetcher::RecordTime(int op, uint64_t tx_xtime,size_t size)  // op : 1rea
 
 void Prefetcher::latency_hiccup_read(uint64_t iiops) {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_read),
+          hdr_value_at_percentile(hdr_last_1s_read, 25),
           hdr_value_at_percentile(hdr_last_1s_read, 50),
-          hdr_value_at_percentile(hdr_last_1s_read, 95),
+          hdr_value_at_percentile(hdr_last_1s_read, 75),
+          hdr_value_at_percentile(hdr_last_1s_read, 90),
           hdr_value_at_percentile(hdr_last_1s_read, 99),
-          hdr_value_at_percentile(hdr_last_1s_read, 99.99), iiops);
+          hdr_value_at_percentile(hdr_last_1s_read, 99.9), iiops);
   hdr_reset(hdr_last_1s_read);
   fflush(logFp_read);
 }
 
 void Prefetcher::latency_hiccup_write(uint64_t iiops) {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_write, "write %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_write, "write %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_write),
+          hdr_value_at_percentile(hdr_last_1s_write, 25),
           hdr_value_at_percentile(hdr_last_1s_write, 50),
-          hdr_value_at_percentile(hdr_last_1s_write, 95),
+          hdr_value_at_percentile(hdr_last_1s_write, 75),
+          hdr_value_at_percentile(hdr_last_1s_write, 90),
           hdr_value_at_percentile(hdr_last_1s_write, 99),
-          hdr_value_at_percentile(hdr_last_1s_write, 99.99), iiops);
+          hdr_value_at_percentile(hdr_last_1s_write, 99.9), iiops);
   hdr_reset(hdr_last_1s_write);
   fflush(logFp_write);
 }
 
 void Prefetcher::latency_hiccup_size() {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_size, "size %-11.2lf %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_size, "size %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_size),
+          hdr_value_at_percentile(hdr_last_1s_size, 25),
           hdr_value_at_percentile(hdr_last_1s_size, 50),
-          hdr_value_at_percentile(hdr_last_1s_size, 95),
+          hdr_value_at_percentile(hdr_last_1s_size, 75),
+          hdr_value_at_percentile(hdr_last_1s_size, 90),
           hdr_value_at_percentile(hdr_last_1s_size, 99),
-          hdr_value_at_percentile(hdr_last_1s_size, 99.99));
+          hdr_value_at_percentile(hdr_last_1s_size, 99.9));
   hdr_reset(hdr_last_1s_size);
   fflush(logFp_size);
 }

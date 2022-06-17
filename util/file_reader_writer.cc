@@ -90,6 +90,7 @@ Status RandomAccessFileReader::Read(uint64_t offset, size_t n, Slice* result,
       AlignedBuffer buf;
       buf.Alignment(alignment);
       buf.AllocateNewBuffer(read_size);
+      // fprintf(stderr,"WpAllocateNewBuffer size %d\n",read_size);
       while (buf.CurrentSize() < read_size) {
         size_t allowed;
         if (for_compaction && rate_limiter_ != nullptr) {

@@ -72,7 +72,15 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
 
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
+    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
+
+    int requestNum=left / (256 * 1024);
+    if(left % (256 * 1024)!=0)
+    {
+      requestNum++;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+                                      requestNum);
     uint64_t begin=Prefetcher::now();
     ssize_t done = write(fd, src, bytes_to_write);
     uint64_t end=Prefetcher::now();
@@ -95,10 +103,17 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
 
   const char* src = buf;
   size_t left = nbyte;
-
+  
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
+    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
+    int requestNum=left / (256 * 1024);
+    if(left % (256 * 1024)!=0)
+    {
+      requestNum++;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+                                      requestNum);
     uint64_t begin=Prefetcher::now();
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
     uint64_t end=Prefetcher::now();
@@ -118,6 +133,7 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
 }
 
 size_t GetLogicalBufferSize(int __attribute__((__unused__)) fd) {
+  // return kDefaultPageSize;
 #ifdef OS_LINUX
   struct stat buf;
   int result = fstat(fd, &buf);
@@ -308,7 +324,14 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    int requestNum=left / (256 * 1024);
+    if(left % (256 * 1024)!=0)
+    {
+      requestNum++;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+                                      requestNum);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
@@ -440,6 +463,7 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
     assert(IsSectorAligned(n, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(scratch, GetRequiredBufferAlignment()));
   }
+  // fprintf(stderr,"%d  %d   %d\n",GetRequiredBufferAlignment(),GetRequiredBufferAlignment(),GetRequiredBufferAlignment());
   Status s;
   size_t myleft=Prefetcher::TryGetFromPrefetcher(sst_id,offset,n,scratch);
   if(myleft!=n+1)
@@ -453,11 +477,19 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    int requestNum=left / (256 * 1024);
+    if(left % (256 * 1024)!=0)
+    {
+      requestNum++;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+                                      requestNum);   
     uint64_t begin=Prefetcher::now();
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     uint64_t end=Prefetcher::now();
     Prefetcher::RecordTime(1,(end-begin)/1000,left);
+    
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
         continue;
@@ -1127,7 +1159,14 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    int requestNum=left / (256 * 1024);
+    if(left % (256 * 1024)!=0)
+    {
+      requestNum++;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+                                      requestNum);
     ssize_t done = pread(fd_, ptr, left, offset);
     if (done < 0) {
       // error while reading from file

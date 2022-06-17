@@ -167,7 +167,7 @@ bool CacheRecord::Deserialize(const Slice& data) {
 
   memcpy(&hdr_, data.data(), sizeof(hdr_));
 
-  assert(hdr_.key_size_ + hdr_.val_size_ + sizeof(hdr_) == data.size());
+  // assert(hdr_.key_size_ + hdr_.val_size_ + sizeof(hdr_) == data.size());
   if (hdr_.key_size_ + hdr_.val_size_ + sizeof(hdr_) != data.size()) {
     return false;
   }
