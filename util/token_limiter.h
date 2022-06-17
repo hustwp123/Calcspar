@@ -4,6 +4,7 @@
 #include <deque>
 #include <memory>
 #include <queue>
+#include <random>
 #include <ratio>
 
 #include "port/port.h"
@@ -38,7 +39,8 @@ class TokenLimiter {
   uint64_t next_refill_sec_;
   // 900 * 1000, 700 * 1000, 500 * 1000, 0
 
-  const uint64_t limits[Env::IOSource::IO_SRC_DEFAULT]={900 * 1000, 800 * 1000, 500 * 1000, 0};
+  const uint64_t limits[Env::IOSource::IO_SRC_DEFAULT] = {
+      900 * 1000, 800 * 1000, 500 * 1000, 0};
   //
   // Prefetch, Compaction, Flush, User
   uint64_t wait_threshold_us_[Env::IOSource::IO_SRC_DEFAULT];
@@ -47,7 +49,7 @@ class TokenLimiter {
 
   // IO_SRC_DEFAULT will not enqueue, just bypass.
   std::deque<Req*> queues_[Env::IOSource::IO_SRC_DEFAULT];
-
+  std::mt19937 rng_;
   int32_t requests_to_wait_;
   port::CondVar exit_cv_;
   bool has_pending_waiter_;
@@ -56,11 +58,12 @@ class TokenLimiter {
  public:
   static TokenLimiter* GetDefaultInstance();
   static void SetDefaultInstance(std::unique_ptr<TokenLimiter> limiter);
-  static void RequestDefaultToken(Env::IOSource io_src, IOType io_type,int32_t n = 1);
+  static void RequestDefaultToken(Env::IOSource io_src, IOType io_type,
+                                  int32_t n = 1);
   static void PrintStatus();
   static bool ManualTune(Env::IOSource io_src, uint64_t wait_threshold_us);
 
-  static void TunePriority(Env::IOSource io_src,bool add);
+  static void TunePriority(Env::IOSource io_src, bool add);
 
  public:
   explicit TokenLimiter(int32_t tokens_per_sec);
@@ -76,7 +79,7 @@ class TokenLimiter {
   // dispatch token to req in queue
   void DispatchToken(uint64_t now_us);
   bool Tune(Env::IOSource io_src, uint64_t wait_threshold_us);
-  void TunePriority_(Env::IOSource io_src,bool add);
+  void TunePriority_(Env::IOSource io_src, bool add);
 };
 
 }  // namespace rocksdb
