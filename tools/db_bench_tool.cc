@@ -5236,6 +5236,17 @@ class Benchmark {
     Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
       // uint64_t now = FLAGS_env->NowMicros();
+
+      uint64_t tiktoks=FLAGS_env->NowMicros()-init_time;
+      if(thread->tid==1&&tiktoks>1000*1000000)
+      {
+        thread->shared->read_rate_limiter->SetBytesPerSecond(4000);
+      }
+      else if(thread->tid==1&&tiktoks>2500*1000000)
+      {
+        thread->shared->read_rate_limiter->SetBytesPerSecond(4500);
+      }
+
       // if((now-init_time)/1000000>10)
       // {
       //   if(flag)
@@ -6961,7 +6972,15 @@ class Benchmark {
             entries_per_batch_ * (value_size_ + key_size_), Env::IO_HIGH,
             nullptr /* stats */, RateLimiter::OpType::kWrite);
       }
-      // tiktoks=FLAGS_env->NowMicros()-tiktok_start;
+      tiktoks=FLAGS_env->NowMicros()-tiktok_start;
+      if(tiktoks>1000*1000000)
+      {
+        write_rate_limiter->SetBytesPerSecond(5*((9000*(16+256))));
+      }
+      else if(tiktoks>2500*1000000)
+      {
+        write_rate_limiter->SetBytesPerSecond(((18000*(16+256))));
+      }
       // // fprintf(stderr,"tiktoks=%ld\n",tiktoks);
       // if(tiktoks>120*1000000)
       // {

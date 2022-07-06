@@ -467,6 +467,8 @@ class ColumnFamilyData {
     kMemtableLimit,
     kL0FileCountLimit,
     kPendingCompactionBytes,
+    kL0Slow,
+    kOther,
   };
   static std::pair<WriteStallCondition, WriteStallCause>
   GetWriteStallConditionAndCause(int num_unflushed_memtables, int num_l0_files,

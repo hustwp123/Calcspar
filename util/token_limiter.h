@@ -15,6 +15,9 @@ namespace rocksdb {
 
 class TokenLimiter {
  public:
+  int subtimes=0;
+  int addtimes=5;
+
   enum IOType {
     kRead,
     kWrite,

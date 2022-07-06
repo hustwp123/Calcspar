@@ -72,19 +72,18 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
 
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
 
     int requestNum=left / (256 * 1024);
     if(left % (256 * 1024)!=0)
     {
       requestNum++;
     }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
                                       requestNum);
     uint64_t begin=Prefetcher::now();
     ssize_t done = write(fd, src, bytes_to_write);
     uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(2,(end-begin)/1000,left);
+    // Prefetcher::RecordTime(2,(end-begin)/1000,left);
     if (done < 0) {
       if (errno == EINTR) {
         continue;
@@ -106,13 +105,16 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
   
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite);
-    int requestNum=left / (256 * 1024);
+    int requestNum=bytes_to_write / (256 * 1024);
     if(left % (256 * 1024)!=0)
     {
       requestNum++;
     }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
+    if(io_src==Env::IOSource::IO_SRC_DEFAULT)
+    {
+      io_src=Env::IOSource::IO_SRC_USER;
+    }
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
                                       requestNum);
     uint64_t begin=Prefetcher::now();
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
@@ -324,7 +326,6 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     int requestNum=left / (256 * 1024);
     if(left % (256 * 1024)!=0)
     {
@@ -477,11 +478,14 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     int requestNum=left / (256 * 1024);
     if(left % (256 * 1024)!=0)
     {
       requestNum++;
+    }
+    if(io_src==Env::IOSource::IO_SRC_DEFAULT)
+    {
+      io_src=Env::IOSource::IO_SRC_USER;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);   
@@ -1159,7 +1163,6 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    // TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
     int requestNum=left / (256 * 1024);
     if(left % (256 * 1024)!=0)
     {

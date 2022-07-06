@@ -717,6 +717,36 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
     return {WriteStallCondition::kDelayed,
             WriteStallCause::kPendingCompactionBytes};
   }
+  if (!mutable_cf_options.disable_auto_compactions &&
+             num_l0_files >= mutable_cf_options.level0_stop_writes_trigger/4*3) {
+              fprintf(stderr,"con 1\n");
+    return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
+  } else if (!mutable_cf_options.disable_auto_compactions &&
+             mutable_cf_options.hard_pending_compaction_bytes_limit > 0 &&
+             num_compaction_needed_bytes >=
+                 mutable_cf_options.hard_pending_compaction_bytes_limit/4*3) {
+                  fprintf(stderr,"con 2\n");
+    return {WriteStallCondition::kNormal,
+            WriteStallCause::kL0Slow};
+  } else if (mutable_cf_options.max_write_buffer_number > 3 &&
+             num_unflushed_memtables >=
+                 mutable_cf_options.max_write_buffer_number - 1) {
+                  fprintf(stderr,"con 3\n");
+    return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
+  } else if (!mutable_cf_options.disable_auto_compactions &&
+             mutable_cf_options.level0_slowdown_writes_trigger >= 0 &&
+             num_l0_files >=
+                 mutable_cf_options.level0_slowdown_writes_trigger/4*3) {
+                  fprintf(stderr,"con 4\n");
+    return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
+  } else if (!mutable_cf_options.disable_auto_compactions &&
+             mutable_cf_options.soft_pending_compaction_bytes_limit > 0 &&
+             num_compaction_needed_bytes >=
+                 mutable_cf_options.soft_pending_compaction_bytes_limit/4*3) {
+                  fprintf(stderr,"con 5\n");
+    return {WriteStallCondition::kNormal,
+            WriteStallCause::kOther};
+  }
   return {WriteStallCondition::kNormal, WriteStallCause::kNone};
 }
 
@@ -749,6 +779,16 @@ WriteStallCondition ColumnFamilyData::RecalculateWriteStallConditions(
         //提升compaction优先级 时间片加0.1秒
         TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,true);
       }
+    }
+    else if(write_stall_cause==WriteStallCause::kL0Slow)
+    {
+      //提升Flush优先级 时间片加0.1秒
+        TokenLimiter::TunePriority(Env::IO_SRC_FLUSH_L0COMP,true);
+    }
+    else if(write_stall_cause==WriteStallCause::kOther)
+    {
+      //提升compaction优先级 时间片加0.1秒
+        TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,true);
     }
     else
     {

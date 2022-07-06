@@ -108,6 +108,8 @@ class Prefetcher {
  public:
   uint64_t hit_times=0;
   uint64_t all_times=0;
+  uint64_t prefetch_times=0;
+  uint64_t blkcache_insert_times=0;
   std::unordered_map<uint64_t, char*> sst_blocks;
   std::vector<char*> mems;
 
@@ -129,38 +131,33 @@ class Prefetcher {
   FILE *logFp_read = nullptr;
   FILE *logFp_write = nullptr;
   FILE *logFp_size = nullptr;
+  FILE *logFp_prefetch_times = nullptr;
+  FILE *logFp_limiter_time = nullptr;
+
+  uint64_t limiter_star_time=0;
+
+  int log_time=0;
+  uint64_t prefetch_start=0;
+  int t_prefetch_times=0;
+
   int readiops = 0;
   int writeiops = 0;
   uint64_t tiktoks = 0;
   uint64_t tiktok_start = 0;
+
+
   static void RecordTime(int op, uint64_t tx_xtime,size_t size);
   void _RecordTime(int op, uint64_t tx_xtime,size_t size);
-  void latency_hiccup_read(uint64_t iops);
+  void latency_hiccup_read(uint64_t iops,uint64_t alliops);
   void latency_hiccup_write(uint64_t iops);
   void latency_hiccup_size();
 
-  ~Prefetcher() {
-    fprintf(stderr,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
-    if(logFp_read!=nullptr)
-    {
-      fprintf(logFp_size,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
-      fclose(logFp_read);
-      fclose(logFp_write);
-      fclose(logFp_size);
+  void log_prefetch_times(int time,int times);
 
-      free(hdr_last_1s_read);
-      free(hdr_last_1s_write);
-      free(hdr_last_1s_size);
-    }
-    
-    if (buf_ != nullptr) {
-      free(buf_);
-      buf_ = nullptr;
-    }
-    fprintf(stderr, "~Prefetcher\n");
-  }
+  ~Prefetcher();
+   
 
-  const size_t MAXSSTNUM = 20*1036;  // ssd中缓存的sst_blk的最大数目
+  const size_t MAXSSTNUM = 10*1036;  // ssd中缓存的sst_blk的最大数目
 
   Env* env_ = nullptr;
   mutable port::Mutex lock_;        // synchronization primitive
@@ -203,5 +200,9 @@ class Prefetcher {
 
   size_t _PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
                             char* scratch);
+
+  static void blkcacheInsert();
+
+  static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush);
 };
 }  // namespace rocksdb

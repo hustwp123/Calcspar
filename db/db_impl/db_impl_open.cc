@@ -1323,8 +1323,8 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
       IsWalDirSameAsDBPath(&impl->immutable_db_options_);
 
   Prefetcher::Init2();
-  // TokenLimiter::SetDefaultInstance(
-  //     std::unique_ptr<TokenLimiter>(new TokenLimiter(4950)));
+  TokenLimiter::SetDefaultInstance(
+      std::unique_ptr<TokenLimiter>(new TokenLimiter(4950)));
 
   impl->mutex_.Lock();
   // Handles create_if_missing, error_if_exists

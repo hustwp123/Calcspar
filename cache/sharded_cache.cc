@@ -12,6 +12,7 @@
 #include <string>
 
 #include "util/mutexlock.h"
+#include "prefetcher/prefetcher.h"
 
 namespace rocksdb {
 
@@ -46,6 +47,7 @@ void ShardedCache::SetStrictCapacityLimit(bool strict_capacity_limit) {
 Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             void (*deleter)(const Slice& key, void* value),
                             Handle** handle, Priority priority) {
+  Prefetcher::blkcacheInsert();
   uint32_t hash = HashSlice(key);
   return GetShard(Shard(hash))
       ->Insert(key, hash, value, charge, deleter, handle, priority);

@@ -9,6 +9,32 @@ std::vector<DbPath> db_paths = {
     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
 };
 
+Prefetcher::~Prefetcher()
+{
+    fprintf(stderr,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
+    fprintf(stderr,"prefetcher insert times: %lu    blkcache insert times: %lu\n",prefetch_times,blkcache_insert_times);
+    if(logFp_read!=nullptr)
+    {
+      fprintf(logFp_size,"prefetcher hit times: %lu    all times: %lu\n",hit_times,all_times);
+      fprintf(logFp_size,"prefetcher insert times: %lu    blkcache insert times: %lu\n",prefetch_times,blkcache_insert_times);
+      fclose(logFp_read);
+      fclose(logFp_write);
+      fclose(logFp_size);
+      fclose(logFp_prefetch_times);
+      fclose(logFp_limiter_time);
+
+      free(hdr_last_1s_read);
+      free(hdr_last_1s_write);
+      free(hdr_last_1s_size);
+    }
+    
+    if (buf_ != nullptr) {
+      free(buf_);
+      buf_ = nullptr;
+    }
+    fprintf(stderr, "~Prefetcher\n");
+  }
+
 bool doPrefetch = true;
 void caluateSstHeatThread()  //统计sst热度线程
 {
@@ -28,8 +54,22 @@ void prefetchThread()  //统计sst热度线程
 
 void Prefetcher::Prefetche() {
   static Prefetcher &i = _GetInst();
-  i._Prefetcher();
-  // i._PrefetcherToMem();
+
+  // i._Prefetcher();
+  i._PrefetcherToMem();
+}
+void Prefetcher::RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush)
+{
+  static Prefetcher &i = _GetInst();
+  uint64_t t=now();
+  int time=(t-i.limiter_star_time)/1000000000;
+  fprintf(i.logFp_limiter_time,"%d  %lu  %lu  %lu\n",time,prefetch,compaction,flush);
+  fflush(i.logFp_limiter_time);
+}
+void Prefetcher::blkcacheInsert()
+{
+  static Prefetcher &i = _GetInst();
+  i.blkcache_insert_times++;
 }
 
 void Prefetcher::CaluateSstHeat() {
@@ -38,6 +78,7 @@ void Prefetcher::CaluateSstHeat() {
 }
 void Prefetcher::_PrefetcherToMem() {
   lock_.Lock();
+  
   // fprintf(stderr, "prefetcher begin\n");
   uint64_t fromKey = 0;
   uint64_t outKey = 0;
@@ -132,6 +173,14 @@ void Prefetcher::_PrefetcherToMem() {
     lock_mem.Unlock();
   }
   // fprintf(stderr, "prefetcher end\n");
+  prefetch_times++;
+  t_prefetch_times++;
+  uint64_t t_tiktoks = now() - prefetch_start;
+  if (t_tiktoks >= 1000000000) {
+    log_prefetch_times(t_tiktoks/1000000000,t_prefetch_times);
+    prefetch_start = now();
+    t_prefetch_times=0;
+  }
   
   lock_.Unlock();
 }
@@ -408,8 +457,8 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
     }
     // lock_.Unlock();
     size_t re=errorFlag;
-    re=_PrefetcherOneFile(key, offset, n, scratch);
-    // re=_PrefetcherFromMem(key, offset, n, scratch);
+    // re=_PrefetcherOneFile(key, offset, n, scratch);
+    re=_PrefetcherFromMem(key, offset, n, scratch);
     if(re!=errorFlag)
     {
       hit_times++;
@@ -451,10 +500,16 @@ void Prefetcher::_Init2() {
     logFp_read = std::fopen("./ssd_rlat.log", "w+");
     logFp_write = std::fopen("./ssd_wlat.log", "w+");
     logFp_size =std::fopen("./ssd_size.log", "w+");
-    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    logFp_prefetch_times =std::fopen("./prefetch_times.log", "w+");
+    logFp_limiter_time =std::fopen("./limiter_time.log", "w+");
+    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS rwIOPS\n");
     fprintf(logFp_write, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
     fprintf(logFp_size, "#type mean   25th   50th   75th    90th    99th    99.9th ");
+    fprintf(logFp_prefetch_times, "#time  prefetch_times");
+    fprintf(logFp_limiter_time, "#prefetch  compaction  flush&l0compaction\n");
     tiktok_start = now();
+    prefetch_start=now();
+    limiter_star_time=now();
   }
 }
 
@@ -483,10 +538,16 @@ void Prefetcher::_Init() {
     logFp_read = std::fopen("./ssd_rlat.log", "w+");
     logFp_write = std::fopen("./ssd_wlat.log", "w+");
     logFp_size =std::fopen("./ssd_size.log", "w+");
-    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
+    logFp_prefetch_times =std::fopen("./prefetch_times.log", "w+");
+    logFp_prefetch_times =std::fopen("./prefetch_times.log", "w+");
+    fprintf(logFp_read, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS rwIOPS\n");
     fprintf(logFp_write, "#type mean   25th   50th   75th    90th    99th    99.9th    IOPS\n");
     fprintf(logFp_size, "#type mean   25th   50th   75th    90th    99th    99.9th ");
+    fprintf(logFp_prefetch_times, "#time  prefetch_times");
+    fprintf(logFp_limiter_time, "#time prefetch  compaction  flush&l0compaction\n");
     tiktok_start = now();
+    prefetch_start=now();
+    limiter_star_time=now();
   }
 
   std::thread t(caluateSstHeatThread);
@@ -533,17 +594,24 @@ void Prefetcher::RecordTime(int op, uint64_t tx_xtime,size_t size)  // op : 1rea
   i._RecordTime(op, tx_xtime,size);
 }
 
-
-void Prefetcher::latency_hiccup_read(uint64_t iiops) {
+void Prefetcher::log_prefetch_times(int time,int times) {
   // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
-  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
+  fprintf(logFp_prefetch_times, "%-8ld  %-8ld\n",log_time+time,times);
+  log_time+=time;
+  fflush(logFp_prefetch_times);
+}
+
+
+void Prefetcher::latency_hiccup_read(uint64_t iiops,uint64_t alliops) {
+  // fprintf(f_hdr_hiccup_output_, "mean     95th     99th     99.99th   IOPS");
+  fprintf(logFp_read, "read %-11.2lf %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld %-8ld\n",
           hdr_mean(hdr_last_1s_read),
           hdr_value_at_percentile(hdr_last_1s_read, 25),
           hdr_value_at_percentile(hdr_last_1s_read, 50),
           hdr_value_at_percentile(hdr_last_1s_read, 75),
           hdr_value_at_percentile(hdr_last_1s_read, 90),
           hdr_value_at_percentile(hdr_last_1s_read, 99),
-          hdr_value_at_percentile(hdr_last_1s_read, 99.9), iiops);
+          hdr_value_at_percentile(hdr_last_1s_read, 99.9), iiops,alliops);
   hdr_reset(hdr_last_1s_read);
   fflush(logFp_read);
 }
@@ -586,18 +654,22 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,size_t size)  // op : 1re
     fprintf(stderr, "too large tx_xtime");
     return;
   }
-
+  int num=size/(256*1024);
+  if(size%(256*1024)!=0)
+  {
+    num++;
+  }
   if (op == 1) {
     hdr_record_value(hdr_last_1s_read, tx_xtime);
     hdr_record_value(hdr_last_1s_size, size);
-    readiops++;
+    readiops+=num;
   } else if (op == 2) {
     hdr_record_value(hdr_last_1s_write, tx_xtime);
-    writeiops++;
+    writeiops+=num;
   }
   tiktoks = now() - tiktok_start;
   if (tiktoks >= 1000000000) {
-    latency_hiccup_read(readiops);
+    latency_hiccup_read(readiops,readiops+writeiops);
     latency_hiccup_write(writeiops);
     latency_hiccup_size();
     tiktok_start = now();

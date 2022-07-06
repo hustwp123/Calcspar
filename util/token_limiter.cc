@@ -11,6 +11,7 @@
 #include <ratio>
 
 #include "util/mutexlock.h"
+#include "prefetcher/prefetcher.h"
 
 namespace rocksdb {
 
@@ -90,7 +91,7 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{900 * 1000, 800 * 1000, 500 * 1000, 0},
+      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),
@@ -275,37 +276,48 @@ bool TokenLimiter::Tune(Env::IOSource io_src, uint64_t wait_threshold_us) {
 
 void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
   if (!add && wait_threshold_us_[io_src] == limits[io_src]) {
-    fprintf(stderr, "%d priority now=%lu\n", io_src,
-            wait_threshold_us_[io_src]);
+    // fprintf(stderr, "%d priority now=%lu\n", io_src,
+    //         wait_threshold_us_[io_src]);
     return;
   }
-  MutexLock g(&request_mutex_);
+  // MutexLock g(&request_mutex_);
+  request_mutex_.Lock();
   if (io_src >= Env::IO_SRC_DEFAULT || io_src < Env::IO_SRC_PREFETCH) {
+    request_mutex_.Unlock();
+    return;
+  }
+  if(add&&addtimes<5)
+  {
+    addtimes++;
+    request_mutex_.Unlock();
+    return;
+  }
+  if(!add&&subtimes<10)
+  {
+    subtimes++;
+    request_mutex_.Unlock();
     return;
   }
   if (add && wait_threshold_us_[io_src] > 0) {
     wait_threshold_us_[io_src] = wait_threshold_us_[io_src] - 100 * 1000;
     fprintf(stderr, "%d priority now=%lu\n", io_src,
             wait_threshold_us_[io_src]);
+    addtimes=0;
   } else {
     wait_threshold_us_[io_src] =
         std::min(wait_threshold_us_[io_src] + 100 * 1000, limits[io_src]);
     fprintf(stderr, "%d priority now=%lu\n", io_src,
             wait_threshold_us_[io_src]);
+    subtimes=0;
   }
 
-  // 0 <= io_src < Env::IO_SRC_DEFAULT
+  int a=wait_threshold_us_[0];
+  int b=wait_threshold_us_[1];
+  int c=wait_threshold_us_[2];
+  request_mutex_.Unlock();
+  Prefetcher::RecordLimiterTime(a,b,c);
 
-  // if (io_src + 1 != Env::IO_SRC_DEFAULT &&
-  //     wait_threshold_us_[io_src]t_threshold_us < wait_threshold_us_[io_src +
-  //     1]) {
-  //   return false;
-  // }
-  // if (io_src != 0 && wait_threshold_us > wait_threshold_us_[io_src - 1]) {
-  //   return false;
-  // }
-  // wait_threshold_us_[io_src] = wait_threshold_us;
-  // return true;
+
 }
 
 }  // namespace rocksdb
