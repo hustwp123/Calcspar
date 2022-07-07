@@ -101,6 +101,8 @@
 #include "util/stop_watch.h"
 #include "util/string_util.h"
 
+#include "prefetcher/prefetcher.h"
+
 namespace rocksdb {
 const std::string kDefaultColumnFamilyName("default");
 const std::string kPersistentStatsColumnFamilyName(

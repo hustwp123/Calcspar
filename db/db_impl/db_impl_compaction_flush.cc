@@ -1089,24 +1089,32 @@ Status DBImpl::CompactFilesImpl(
 
 Status DBImpl::PauseBackgroundWork() {
   InstrumentedMutexLock guard_lock(&mutex_);
-  bg_compaction_paused_++;
   while (bg_bottom_compaction_scheduled_ > 0 || bg_compaction_scheduled_ > 0 ||
          bg_flush_scheduled_ > 0) {
     bg_cv_.Wait();
   }
-  bg_work_paused_++;
+  bg_compaction_paused_++;
+  // bg_work_paused_++;
   return Status::OK();
 }
 
 Status DBImpl::ContinueBackgroundWork() {
   InstrumentedMutexLock guard_lock(&mutex_);
-  if (bg_work_paused_ == 0) {
-    return Status::InvalidArgument();
+  // if (bg_work_paused_ == 0) {
+  //   return Status::InvalidArgument();
+  // }
+  // assert(bg_work_paused_ > 0);
+  // assert(bg_compaction_paused_ > 0);
+  if(bg_compaction_paused_>0)
+  {
+    bg_compaction_paused_--;
   }
-  assert(bg_work_paused_ > 0);
-  assert(bg_compaction_paused_ > 0);
-  bg_compaction_paused_--;
-  bg_work_paused_--;
+  
+  if(bg_work_paused_>0)
+  {
+    bg_work_paused_--;
+  }
+  
   // It's sufficient to check just bg_work_paused_ here since
   // bg_work_paused_ is always no greater than bg_compaction_paused_
   if (bg_work_paused_ == 0) {
@@ -1928,7 +1936,8 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
   if (bg_compaction_paused_ > 0) {
     // we paused the background compaction
     return;
-  } else if (error_handler_.IsBGWorkStopped()) {
+  } 
+  if (error_handler_.IsBGWorkStopped()) {
     // Compaction is not part of the recovery sequence from a hard error. We
     // might get here because recovery might do a flush and install a new
     // super version, which will try to schedule pending compactions. Bail

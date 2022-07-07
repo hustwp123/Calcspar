@@ -17,6 +17,7 @@
 #include <thread>
 #include <unordered_map>
 #include <cstring>
+#include <list>
 
 #include <hdr/hdr_histogram.h>
 
@@ -27,6 +28,9 @@
 #include "rocksdb/options.h"
 #include "table/block_based/block_based_table_reader.h"
 #include "util/mutexlock.h"
+
+
+#include "db/db_impl/db_impl.h"
 
 #define NS_PER_SECOND 1000000000  //一秒的纳秒数
 #define NS_PER_USECOND 1000       //一微秒的纳秒数
@@ -104,8 +108,13 @@ class SstManager {
   }
 };
 
+#define IOPS_MAX 5000
+
 class Prefetcher {
  public:
+  DBImpl *impl_;
+  bool paused=false;
+  std::list<int> lastIOPS;//过去10秒内的IOPS
   uint64_t hit_times=0;
   uint64_t all_times=0;
   uint64_t prefetch_times=0;
@@ -119,10 +128,8 @@ class Prefetcher {
 
   bool logRWlat=true;
 
-  static void Init();
-  void _Init();
-  static void Init2();
-  void _Init2();
+  static void Init(DBImpl *impl,bool doPrefetch_);
+  void _Init(DBImpl *impl,bool doPrefetch_);
   static int64_t now();
 
   struct hdr_histogram *hdr_last_1s_read = NULL;
@@ -204,5 +211,7 @@ class Prefetcher {
   static void blkcacheInsert();
 
   static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush);
+
+  static bool getCompactionPaused();
 };
 }  // namespace rocksdb
