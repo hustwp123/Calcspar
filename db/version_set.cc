@@ -5025,9 +5025,8 @@ InternalIterator* VersionSet::MakeInputIterator(
     const EnvOptions& env_options_compactions) {
   auto cfd = c->column_family_data();
 
-  ReadOptions read_options(c->input_levels(0)->num_files
-                               ? Env::IO_SRC_FLUSH_L0COMP
-                               : Env::IO_SRC_COMPACTION);
+  ReadOptions read_options(c->output_level() <= 1 ? Env::IO_SRC_FLUSH_L0COMP
+                                                  : Env::IO_SRC_COMPACTION);
 
   read_options.verify_checksums = true;
   read_options.fill_cache = false;
