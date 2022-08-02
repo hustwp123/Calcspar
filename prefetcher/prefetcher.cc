@@ -7,13 +7,17 @@
 
 namespace rocksdb {
 
-// bool pauseComapaction=false;
 std::atomic<bool> pauseComapaction;
 
 std::vector<DbPath> db_paths = {
     {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
 };
+
+// std::vector<DbPath> db_paths = {
+//     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
+//     {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+// };
 
 Prefetcher::~Prefetcher() {
   pauseComapaction = false;
@@ -75,9 +79,13 @@ void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
   static Prefetcher &i = _GetInst();
   uint64_t t = now();
   int time = (t - i.limiter_star_time) / 1000000000;
-  fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu\n", time, prefetch,
+  if(i.logRWlat)
+  {
+    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu\n", time, prefetch,
           compaction, flush);
-  fflush(i.logFp_limiter_time);
+    fflush(i.logFp_limiter_time);
+  }
+  
 }
 void Prefetcher::blkcacheInsert() {
   static Prefetcher &i = _GetInst();
@@ -121,7 +129,6 @@ void Prefetcher::_PrefetcherToMem() {
     fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
             cloudManager.sstMap[fromKey]->get_times);
     lock_.Lock();
-    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
     SstTemp *t = cloudManager.sstMap[fromSstId];
     cloudManager.sstMap.erase(fromSstId);
     delete t;
@@ -133,7 +140,6 @@ void Prefetcher::_PrefetcherToMem() {
   if (readfd == -1) {
     lock_.Lock();
 
-    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
     SstTemp *t = cloudManager.sstMap[fromSstId];
     cloudManager.sstMap.erase(fromSstId);
     delete t;
@@ -184,7 +190,7 @@ void Prefetcher::_PrefetcherToMem() {
   prefetch_times++;
   t_prefetch_times++;
   uint64_t t_tiktoks = now() - prefetch_start;
-  if (t_tiktoks >= 1000000000) {
+  if (t_tiktoks >= 1000000000&&logRWlat) {
     log_prefetch_times(t_tiktoks / 1000000000, t_prefetch_times);
     prefetch_start = now();
     t_prefetch_times = 0;
@@ -650,41 +656,43 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
   }
   tiktoks = now() - tiktok_start;
   if (tiktoks >= 1000000000) {
-    latency_hiccup_read(readiops, readiops + writeiops);
-    latency_hiccup_write(writeiops);
-    latency_hiccup_size();
-
-    fprintf(stderr, "paused=%d\n", paused);
-    if (lastIOPS.size() < 10) {
-      lastIOPS.push_back(readiops);
-    } else {
-      lastIOPS.pop_front();
-      lastIOPS.push_back(readiops);
-      int allIOPS = 0;
-      for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
-        allIOPS += *i;
-      }
-      fprintf(stderr, "allIOPS=%d size=%d\n", allIOPS, lastIOPS.size());
-      bool t = pauseComapaction.load();
-      if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.8 && !t) {
-        pauseComapaction.store(true);
-        fprintf(stderr, "pauseComapaction from false to true\n");
-        if (!paused) {
-          fprintf(stderr, "stop compaction 0\n\n\n");
-          impl_->PauseBackgroundWork();
-          paused = true;
-          fprintf(stderr, "stop compaction\n\n\n");
-        }
-      } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.8 && t) {
-        pauseComapaction.store(false);
-        fprintf(stderr, "pauseComapaction from true to false\n");
-        if (paused) {
-          impl_->ContinueBackgroundWork();
-          paused = false;
-          fprintf(stderr, "continue compaction\n\n\n");
-        }
-      }
+    if(logRWlat)
+    {
+      latency_hiccup_read(readiops, readiops + writeiops);
+      latency_hiccup_write(writeiops);
+      latency_hiccup_size();
     }
+    // fprintf(stderr, "paused=%d\n", paused);
+    // if (lastIOPS.size() < 10) {
+    //   lastIOPS.push_back(readiops);
+    // } else {
+    //   lastIOPS.pop_front();
+    //   lastIOPS.push_back(readiops);
+    //   int allIOPS = 0;
+    //   for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
+    //     allIOPS += *i;
+    //   }
+    //   fprintf(stderr, "allIOPS=%d size=%d\n", allIOPS, lastIOPS.size());
+    //   bool t = pauseComapaction.load();
+    //   if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.8 && !t) {
+    //     pauseComapaction.store(true);
+    //     fprintf(stderr, "pauseComapaction from false to true\n");
+    //     if (!paused) {
+    //       fprintf(stderr, "stop compaction 0\n\n\n");
+    //       impl_->PauseBackgroundWork();
+    //       paused = true;
+    //       fprintf(stderr, "stop compaction\n\n\n");
+    //     }
+    //   } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.8 && t) {
+    //     pauseComapaction.store(false);
+    //     fprintf(stderr, "pauseComapaction from true to false\n");
+    //     if (paused) {
+    //       impl_->ContinueBackgroundWork();
+    //       paused = false;
+    //       fprintf(stderr, "continue compaction\n\n\n");
+    //     }
+    //   }
+    // }
 
     tiktok_start = now();
     readiops = 0;

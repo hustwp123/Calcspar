@@ -1560,6 +1560,37 @@ struct DBWithColumnFamilies {
   }
 };
 
+enum OperationType : unsigned char {
+  kRead = 0,
+  kWrite,
+  kDelete,
+  kSeek,
+  kMerge,
+  kUpdate,
+  kCompress,
+  kUncompress,
+  kCrc,
+  kHash,
+  kReadHiccup,   // xp op latency info during the last report interval
+  kWriteHiccup,  // xp
+  kOthers
+};
+
+static std::unordered_map<OperationType, std::string, std::hash<unsigned char>>
+    OperationTypeString = {{kRead, "read"},
+                           {kWrite, "write"},
+                           {kDelete, "delete"},
+                           {kSeek, "seek"},
+                           {kMerge, "merge"},
+                           {kUpdate, "update"},
+                           {kCompress, "compress"},
+                           {kCompress, "uncompress"},
+                           {kCrc, "crc"},
+                           {kHash, "hash"},
+                           {kReadHiccup, "readHiccup"},    // xp
+                           {kWriteHiccup, "writeHiccup"},  // xp
+                           {kOthers, "op"}};
+
 // a class that reports stats to CSV file
 class ReporterAgent {
  public:
@@ -1599,6 +1630,7 @@ class ReporterAgent {
   void ReportFinishedOps(int64_t num_ops) {
     total_ops_done_.fetch_add(num_ops);
   }
+
 
  private:
   std::string Header() const { return "secs_elapsed,interval_qps"; }
@@ -1647,38 +1679,18 @@ class ReporterAgent {
   // will notify on stop
   std::condition_variable stop_cv_;
   bool stop_;
-};
 
-enum OperationType : unsigned char {
-  kRead = 0,
-  kWrite,
-  kDelete,
-  kSeek,
-  kMerge,
-  kUpdate,
-  kCompress,
-  kUncompress,
-  kCrc,
-  kHash,
-  kReadHiccup,   // xp op latency info during the last report interval
-  kWriteHiccup,  // xp
-  kOthers
-};
+  std::unordered_map<OperationType, std::shared_ptr<HistogramImpl>,
+                     std::hash<unsigned char>>
+      hist_;
 
-static std::unordered_map<OperationType, std::string, std::hash<unsigned char>>
-    OperationTypeString = {{kRead, "read"},
-                           {kWrite, "write"},
-                           {kDelete, "delete"},
-                           {kSeek, "seek"},
-                           {kMerge, "merge"},
-                           {kUpdate, "update"},
-                           {kCompress, "compress"},
-                           {kCompress, "uncompress"},
-                           {kCrc, "crc"},
-                           {kHash, "hash"},
-                           {kReadHiccup, "readHiccup"},    // xp
-                           {kWriteHiccup, "writeHiccup"},  // xp
-                           {kOthers, "op"}};
+  FILE* fp_op_hiccup_report = NULL;
+
+  uint64_t readdone_ = 0;
+  uint64_t last_report_readdone_ = 0;
+  uint64_t writedone_ = 0;
+  uint64_t last_report_writedone_ = 0;
+};
 
 class CombinedStats;
 class Stats {
@@ -1701,6 +1713,7 @@ class Stats {
   uint64_t bytes_;
   uint64_t last_op_finish_;
   uint64_t last_report_finish_;
+  uint64_t mylast_report_finish_;
   std::unordered_map<OperationType, std::shared_ptr<HistogramImpl>,
                      std::hash<unsigned char>>
       hist_;
@@ -1744,12 +1757,12 @@ class Stats {
     }
     fprintf(stderr, "XXX open fp_ %s success\n",
             op_hiccup_report_fname.c_str());
-    fprintf(
-        fp_op_hiccup_report,
-        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th    Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
-    fprintf(
-        stderr,
-        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th    Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+    fprintf(fp_op_hiccup_report,
+            "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
+            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+    fprintf(stderr,
+            "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
+            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
     return true;
   }
 
@@ -1771,12 +1784,12 @@ class Stats {
     }
     fprintf(stderr, "XXX open fp_ %s success\n",
             op_hiccup_report_fname.c_str());
-    fprintf(
-        fp_op_hiccup_report,
-        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th    Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
-    fprintf(
-        stderr,
-        "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th    Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+    fprintf(fp_op_hiccup_report,
+            "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
+            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+    fprintf(stderr,
+            "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
+            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
     return true;
   }
 
@@ -1881,222 +1894,6 @@ class Stats {
       DBWithColumnFamilies* db_with_cfh, DB* db, int64_t num_ops,
       uint64_t op_start_time,
       enum OperationType op_type = kOthers) {  // num_ops is 1
-    // if (fp_op_hiccup_report == NULL) {
-    //   if (true != OpenReportFile()) {  // xp
-    //     fprintf(stderr, "ERROR open op hiccup file %s failed\n",
-    //             op_hiccup_report_fname.c_str());
-    //   }
-    // }
-    if (reporter_agent_) {
-      reporter_agent_->ReportFinishedOps(num_ops);
-    }
-    if (FLAGS_histogram) {
-      uint64_t now = FLAGS_env->NowMicros();
-      uint64_t micros = now - op_start_time;
-
-      if (hist_.find(op_type) == hist_.end()) {
-        auto hist_temp = std::make_shared<HistogramImpl>();
-        hist_.insert({op_type, std::move(hist_temp)});
-      }
-      hist_[op_type]->Add(micros);
-
-      if (kWrite == op_type) {  // xp
-        writedone_ += num_ops;
-        if (hist_.find(kWriteHiccup) == hist_.end()) {
-          auto hist_tmp_write_hiccup = std::make_shared<HistogramImpl>();
-          hist_.insert({kWriteHiccup, std::move(hist_tmp_write_hiccup)});
-        }
-        hist_[kWriteHiccup]->Add(micros);
-      } else if (kRead == op_type) {
-        readdone_ += num_ops;
-        if (hist_.find(kReadHiccup) == hist_.end()) {
-          auto hist_tmp_read_hiccup = std::make_shared<HistogramImpl>();
-          hist_.insert({kReadHiccup, std::move(hist_tmp_read_hiccup)});
-        }
-        hist_[kReadHiccup]->Add(micros);
-      }
-
-      if (micros > 20000 && !FLAGS_stats_interval) {
-        fprintf(stderr, "long op: %" PRIu64 " micros%30s\r", micros, "");
-        fflush(stderr);
-      }
-      last_op_finish_ = now;
-    }
-
-    done_ += num_ops;
-    if (done_ >= next_report_) {
-      if (!FLAGS_stats_interval) {
-        if (next_report_ < 1000)
-          next_report_ += 100;
-        else if (next_report_ < 5000)
-          next_report_ += 500;
-        else if (next_report_ < 10000)
-          next_report_ += 1000;
-        else if (next_report_ < 50000)
-          next_report_ += 5000;
-        else if (next_report_ < 100000)
-          next_report_ += 10000;
-        else if (next_report_ < 500000)
-          next_report_ += 50000;
-        else
-          next_report_ += 100000;
-        fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
-      } else {
-        uint64_t now = FLAGS_env->NowMicros();
-        int64_t usecs_since_last = now - last_report_finish_;
-
-        // Determine whether to print status where interval is either
-        // each N operations or each N seconds.
-
-        if (FLAGS_stats_interval_seconds &&
-            usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
-          // Don't check again for this many operations
-          next_report_ += FLAGS_stats_interval;
-
-        } else {
-          // xp
-          //  threadID, timestamp, op/s
-          if (fp_op_hiccup_report) {
-            // write
-            if (hist_.find(kWriteHiccup) != hist_.end()) {
-              fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (writedone_ - last_report_writedone_) /
-                          (usecs_since_last / 1000000.0));
-              fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (writedone_ - last_report_writedone_) /
-                          (usecs_since_last / 1000000.0));
-              fflush(fp_op_hiccup_report);
-              // latency min, max, avg., 99th
-              fprintf(stderr, "write %8ld   %8ld   %8.0f   %8.0f\n",
-                      hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
-                      hist_[kWriteHiccup]->Average(),
-                      hist_[kWriteHiccup]->Percentile(99.0));
-              fprintf(fp_op_hiccup_report,
-                      "write %8ld   %8ld   %8.0f   %8.0f\n",
-                      hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
-                      hist_[kWriteHiccup]->Average(),
-                      hist_[kWriteHiccup]->Percentile(99.0));
-              fflush(fp_op_hiccup_report);
-              hist_[kWriteHiccup]->Clear();
-            }
-
-            // read
-            if (hist_.find(kReadHiccup) != hist_.end()) {
-              fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (readdone_ - last_report_readdone_) /
-                          (usecs_since_last / 1000000.0));
-              fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (readdone_ - last_report_readdone_) /
-                          (usecs_since_last / 1000000.0));
-              fflush(fp_op_hiccup_report);
-              fprintf(stderr, "read %8ld   %8ld   %8.0f   %8.0f\n",
-                      hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-                      hist_[kReadHiccup]->Average(),
-                      hist_[kReadHiccup]->Percentile(99.0));
-              fprintf(fp_op_hiccup_report, "read %8ld   %8ld   %8.0f   %8.0f\n",
-                      hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-                      hist_[kReadHiccup]->Average(),
-                      hist_[kReadHiccup]->Percentile(99.0));
-              fflush(fp_op_hiccup_report);
-              hist_[kReadHiccup]->Clear();
-            }
-
-            // fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
-            //         (now - start_) / 1000000.0,
-            //         (readdone_ - last_report_readdone_) /
-            //             (usecs_since_last / 1000000.0));
-            // fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
-            //         (now - start_) / 1000000.0,
-            //         (readdone_ - last_report_readdone_) /
-            //             (usecs_since_last / 1000000.0));
-            // fflush(fp_op_hiccup_report);
-            // fprintf(stderr, "read %8ld   %8ld   %8.0f   %8.0f   %8.0f
-            // %8.0f\n",
-            //         hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-            //         hist_[kReadHiccup]->Average(),
-            //         hist_[kReadHiccup]->Percentile(50.0),hist_[kReadHiccup]->Percentile(75.0)
-            //         ,hist_[kReadHiccup]->Percentile(90.0));
-            // fprintf(fp_op_hiccup_report, "read %8ld   %8ld   %8.0f   %8.0f
-            // %8.0f   %8.0f\n",
-            //         hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-            //         hist_[kReadHiccup]->Average(),
-            //         hist_[kReadHiccup]->Percentile(50.0),hist_[kReadHiccup]->Percentile(75.0)
-            //         ,hist_[kReadHiccup]->Percentile(90.0));
-            // fflush(fp_op_hiccup_report);
-            // hist_[kReadHiccup]->Clear();
-          }
-
-          // fprintf(stderr,
-          //         "%s ... thread %d: (%" PRIu64 ",%" PRIu64 ") ops and "
-          //         "(%.1f,%.1f) ops/second in (%.6f,%.6f) seconds\n",
-          //         FLAGS_env->TimeToString(now/1000000).c_str(),
-          //         id_,
-          //         done_ - last_report_done_, done_,
-          //         (done_ - last_report_done_) /
-          //         (usecs_since_last / 1000000.0),
-          //         done_ / ((now - start_) / 1000000.0),
-          //         (now - last_report_finish_) / 1000000.0,
-          //         (now - start_) / 1000000.0);
-
-          if (id_ == 0 && FLAGS_stats_per_interval) {
-            std::string stats;
-
-            if (db_with_cfh && db_with_cfh->num_created.load()) {
-              for (size_t i = 0; i < db_with_cfh->num_created.load(); ++i) {
-                if (db->GetProperty(db_with_cfh->cfh[i], "rocksdb.cfstats",
-                                    &stats))
-                  fprintf(stderr, "%s\n", stats.c_str());
-                if (FLAGS_show_table_properties) {
-                  for (int level = 0; level < FLAGS_num_levels; ++level) {
-                    if (db->GetProperty(
-                            db_with_cfh->cfh[i],
-                            "rocksdb.aggregated-table-properties-at-level" +
-                                ToString(level),
-                            &stats)) {
-                      if (stats.find("# entries=0") == std::string::npos) {
-                        fprintf(stderr, "Level[%d]: %s\n", level,
-                                stats.c_str());
-                      }
-                    }
-                  }
-                }
-              }
-            } else if (db) {
-              if (db->GetProperty("rocksdb.stats", &stats)) {
-                fprintf(stderr, "%s\n", stats.c_str());
-              }
-              if (FLAGS_show_table_properties) {
-                for (int level = 0; level < FLAGS_num_levels; ++level) {
-                  if (db->GetProperty(
-                          "rocksdb.aggregated-table-properties-at-level" +
-                              ToString(level),
-                          &stats)) {
-                    if (stats.find("# entries=0") == std::string::npos) {
-                      fprintf(stderr, "Level[%d]: %s\n", level, stats.c_str());
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          next_report_ += FLAGS_stats_interval;
-          last_report_finish_ = now;
-          last_report_done_ = done_;
-
-          last_report_readdone_ = readdone_;
-          last_report_writedone_ = writedone_;
-        }
-      }
-      if (id_ == 0 && FLAGS_thread_status_per_interval) {
-        PrintThreadStatus();
-      }
-      fflush(stderr);
-    }
   }
 
   void FinishedOps(DBWithColumnFamilies* db_with_cfh, DB* db, int64_t num_ops,
@@ -2108,6 +1905,8 @@ class Stats {
       }
     }
     if (reporter_agent_) {
+      uint64_t now = FLAGS_env->NowMicros();
+      uint64_t micros = now - last_op_finish_;
       reporter_agent_->ReportFinishedOps(num_ops);
     }
     if (FLAGS_histogram) {
@@ -2144,123 +1943,121 @@ class Stats {
     }
 
     done_ += num_ops;
-    if (done_ >= next_report_) {
-      if (!FLAGS_stats_interval) {
-        if (next_report_ < 1000)
-          next_report_ += 100;
-        else if (next_report_ < 5000)
-          next_report_ += 500;
-        else if (next_report_ < 10000)
-          next_report_ += 1000;
-        else if (next_report_ < 50000)
-          next_report_ += 5000;
-        else if (next_report_ < 100000)
-          next_report_ += 10000;
-        else if (next_report_ < 500000)
-          next_report_ += 50000;
-        else
-          next_report_ += 100000;
-        fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
-      } else {
-        uint64_t now = FLAGS_env->NowMicros();
-        int64_t usecs_since_last = now - last_report_finish_;
 
-        // Determine whether to print status where interval is either
-        // each N operations or each N seconds.
+    uint64_t now = FLAGS_env->NowMicros();
+    int64_t myusecs_since_last = now - mylast_report_finish_;
+    if (FLAGS_stats_interval_seconds &&
+        myusecs_since_last >= (FLAGS_stats_interval_seconds * 1000000)) {
+      // xp
+      //  threadID, timestamp, op/s
+      if (fp_op_hiccup_report) {
+        // write
+        if (hist_.find(kWriteHiccup) != hist_.end()) {
+          fprintf(stderr, "%d %8.0f  %8.0f  ", id_, (now - start_) / 1000000.0,
+                  (writedone_ - last_report_writedone_) /
+                      (myusecs_since_last / 1000000.0));
+          fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
+                  (now - start_) / 1000000.0,
+                  (writedone_ - last_report_writedone_) /
+                      (myusecs_since_last / 1000000.0));
+          fflush(fp_op_hiccup_report);
 
-        if (FLAGS_stats_interval_seconds &&
-            usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
-          // Don't check again for this many operations
-          next_report_ += FLAGS_stats_interval;
+          // latency min, max, avg., 99th
+          fprintf(stderr,
+                  "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                  hist_[kWriteHiccup]->Average(),
+                  hist_[kWriteHiccup]->Percentile(25.0),
+                  hist_[kWriteHiccup]->Percentile(50.0),
+                  hist_[kWriteHiccup]->Percentile(75.0),
+                  hist_[kWriteHiccup]->Percentile(90.0),
+                  hist_[kWriteHiccup]->Percentile(99.0),
+                  hist_[kWriteHiccup]->Percentile(99.9));
+          fprintf(fp_op_hiccup_report,
+                  "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                  hist_[kWriteHiccup]->Average(),
+                  hist_[kWriteHiccup]->Percentile(25.0),
+                  hist_[kWriteHiccup]->Percentile(50.0),
+                  hist_[kWriteHiccup]->Percentile(75.0),
+                  hist_[kWriteHiccup]->Percentile(90.0),
+                  hist_[kWriteHiccup]->Percentile(99.0),
+                  hist_[kWriteHiccup]->Percentile(99.9));
+          fflush(fp_op_hiccup_report);
+          hist_[kWriteHiccup]->Clear();
+        }
 
+        // read
+        if (hist_.find(kReadHiccup) != hist_.end()) {
+          fprintf(stderr, "%d %8.0f  %8.0f  ", id_, (now - start_) / 1000000.0,
+                  (readdone_ - last_report_readdone_) /
+                      (myusecs_since_last / 1000000.0));
+          fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
+                  (now - start_) / 1000000.0,
+                  (readdone_ - last_report_readdone_) /
+                      (myusecs_since_last / 1000000.0));
+          fflush(fp_op_hiccup_report);
+          fprintf(stderr,
+                  "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                  hist_[kReadHiccup]->Average(),
+                  hist_[kReadHiccup]->Percentile(25.0),
+                  hist_[kReadHiccup]->Percentile(50.0),
+                  hist_[kReadHiccup]->Percentile(75.0),
+                  hist_[kReadHiccup]->Percentile(90.0),
+                  hist_[kReadHiccup]->Percentile(99.0),
+                  hist_[kReadHiccup]->Percentile(99.9));
+          fprintf(fp_op_hiccup_report,
+                  "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                  hist_[kReadHiccup]->Average(),
+                  hist_[kReadHiccup]->Percentile(25.0),
+                  hist_[kReadHiccup]->Percentile(50.0),
+                  hist_[kReadHiccup]->Percentile(75.0),
+                  hist_[kReadHiccup]->Percentile(90.0),
+                  hist_[kReadHiccup]->Percentile(99.0),
+                  hist_[kReadHiccup]->Percentile(99.9));
+          fflush(fp_op_hiccup_report);
+          hist_[kReadHiccup]->Clear();
+        }
+        last_report_readdone_ = readdone_;
+        last_report_writedone_ = writedone_;
+        mylast_report_finish_ = now;
+      }
+
+      if (done_ >= next_report_) {
+        if (!FLAGS_stats_interval) {
+          if (next_report_ < 1000)
+            next_report_ += 100;
+          else if (next_report_ < 5000)
+            next_report_ += 500;
+          else if (next_report_ < 10000)
+            next_report_ += 1000;
+          else if (next_report_ < 50000)
+            next_report_ += 5000;
+          else if (next_report_ < 100000)
+            next_report_ += 10000;
+          else if (next_report_ < 500000)
+            next_report_ += 50000;
+          else
+            next_report_ += 100000;
+          fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
         } else {
-          // xp
-          //  threadID, timestamp, op/s
-          if (fp_op_hiccup_report) {
-            // write
-            if (hist_.find(kWriteHiccup) != hist_.end()) {
-              fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (writedone_ - last_report_writedone_) /
-                          (usecs_since_last / 1000000.0));
-              fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (writedone_ - last_report_writedone_) /
-                          (usecs_since_last / 1000000.0));
-              fflush(fp_op_hiccup_report);
+          uint64_t now = FLAGS_env->NowMicros();
+          int64_t usecs_since_last = now - last_report_finish_;
 
-              // latency min, max, avg., 99th
-              fprintf(stderr, 
-                      "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f\n",
-                      hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
-                      hist_[kWriteHiccup]->Average(),
-                      hist_[kWriteHiccup]->Percentile(25.0),
-                      hist_[kWriteHiccup]->Percentile(50.0),
-                      hist_[kWriteHiccup]->Percentile(75.0),
-                      hist_[kWriteHiccup]->Percentile(90.0),
-                      hist_[kWriteHiccup]->Percentile(99.0),
-                      hist_[kWriteHiccup]->Percentile(99.9));
-              fprintf(fp_op_hiccup_report,
-                      "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f\n",
-                      hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
-                      hist_[kWriteHiccup]->Average(),
-                      hist_[kWriteHiccup]->Percentile(25.0),
-                      hist_[kWriteHiccup]->Percentile(50.0),
-                      hist_[kWriteHiccup]->Percentile(75.0),
-                      hist_[kWriteHiccup]->Percentile(90.0),
-                      hist_[kWriteHiccup]->Percentile(99.0),
-                      hist_[kWriteHiccup]->Percentile(99.9));
-              fflush(fp_op_hiccup_report);
-              hist_[kWriteHiccup]->Clear();
-            }
+          // Determine whether to print status where interval is either
+          // each N operations or each N seconds.
 
-            // read
-            if (hist_.find(kReadHiccup) != hist_.end()) {
-              fprintf(stderr, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (readdone_ - last_report_readdone_) /
-                          (usecs_since_last / 1000000.0));
-              fprintf(fp_op_hiccup_report, "%d %8.0f  %8.0f  ", id_,
-                      (now - start_) / 1000000.0,
-                      (readdone_ - last_report_readdone_) /
-                          (usecs_since_last / 1000000.0));
-              fflush(fp_op_hiccup_report);
-              fprintf(stderr, 
-                      "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f\n",
-                      hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-                      hist_[kReadHiccup]->Average(),
-                      hist_[kReadHiccup]->Percentile(25.0),
-                      hist_[kReadHiccup]->Percentile(50.0),
-                      hist_[kReadHiccup]->Percentile(75.0),
-                      hist_[kReadHiccup]->Percentile(90.0),
-                      hist_[kReadHiccup]->Percentile(99.0),
-                      hist_[kReadHiccup]->Percentile(99.9));
-              fprintf(fp_op_hiccup_report, 
-                      "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f\n",
-                      hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-                      hist_[kReadHiccup]->Average(),
-                      hist_[kReadHiccup]->Percentile(25.0),
-                      hist_[kReadHiccup]->Percentile(50.0),
-                      hist_[kReadHiccup]->Percentile(75.0),
-                      hist_[kReadHiccup]->Percentile(90.0),
-                      hist_[kReadHiccup]->Percentile(99.0),
-                      hist_[kReadHiccup]->Percentile(99.9));
-              fflush(fp_op_hiccup_report);
-              hist_[kReadHiccup]->Clear();
-            }
+          if (FLAGS_stats_interval_seconds &&
+              usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
+            // Don't check again for this many operations
+            next_report_ += FLAGS_stats_interval;
           }
-
-          // fprintf(stderr,
-          //         "%s ... thread %d: (%" PRIu64 ",%" PRIu64 ") ops and "
-          //         "(%.1f,%.1f) ops/second in (%.6f,%.6f) seconds\n",
-          //         FLAGS_env->TimeToString(now/1000000).c_str(),
-          //         id_,
-          //         done_ - last_report_done_, done_,
-          //         (done_ - last_report_done_) /
-          //         (usecs_since_last / 1000000.0),
-          //         done_ / ((now - start_) / 1000000.0),
-          //         (now - last_report_finish_) / 1000000.0,
-          //         (now - start_) / 1000000.0);
 
           if (id_ == 0 && FLAGS_stats_per_interval) {
             std::string stats;
@@ -2307,9 +2104,6 @@ class Stats {
           next_report_ += FLAGS_stats_interval;
           last_report_finish_ = now;
           last_report_done_ = done_;
-
-          last_report_readdone_ = readdone_;
-          last_report_writedone_ = writedone_;
         }
       }
       if (id_ == 0 && FLAGS_thread_status_per_interval) {
@@ -4301,15 +4095,14 @@ class Benchmark {
         exit(1);
       }
       // options.rate_limiter.reset(NewGenericRateLimiter(
-      //     FLAGS_rate_limiter_bytes_per_sec, 100 * 1000 /* refill_period_us */,
-      //     10 /* fairness */,
-      //     FLAGS_rate_limit_bg_reads ? RateLimiter::Mode::kReadsOnly
+      //     FLAGS_rate_limiter_bytes_per_sec, 100 * 1000 /* refill_period_us
+      //     */, 10 /* fairness */, FLAGS_rate_limit_bg_reads ?
+      //     RateLimiter::Mode::kReadsOnly
       //                               : RateLimiter::Mode::kWritesOnly,
       //     FLAGS_rate_limiter_auto_tuned));
       options.rate_limiter.reset(NewGenericRateLimiter(
           FLAGS_rate_limiter_bytes_per_sec, 100 * 1000 /* refill_period_us */,
-          10 /* fairness */,
-          RateLimiter::Mode::kAllIo,
+          10 /* fairness */, RateLimiter::Mode::kAllIo,
           FLAGS_rate_limiter_auto_tuned));
     }
 
@@ -5232,34 +5025,9 @@ class Benchmark {
     PinnableSlice pinnable_val;
 
     uint64_t init_time = FLAGS_env->NowMicros();
-    bool flag=true;
+    bool flag = true;
     Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
-      // uint64_t now = FLAGS_env->NowMicros();
-
-      uint64_t tiktoks=FLAGS_env->NowMicros()-init_time;
-      if(thread->tid==1&&tiktoks>1000*1000000)
-      {
-        thread->shared->read_rate_limiter->SetBytesPerSecond(4000);
-      }
-      else if(thread->tid==1&&tiktoks>2500*1000000)
-      {
-        thread->shared->read_rate_limiter->SetBytesPerSecond(4500);
-      }
-
-      // if((now-init_time)/1000000>10)
-      // {
-      //   if(flag)
-      //   {
-      //     thread->shared->read_rate_limiter->SetBytesPerSecond(3500);
-      //   }
-      //   else
-      //   {
-      //     thread->shared->read_rate_limiter->SetBytesPerSecond(2500);
-      //   }
-      //   init_time=now;
-      //   flag=!flag;
-      // }
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       // We use same key_rand as seed for key and column family so that we can
       // deterministically find the cfh corresponding to a particular key, as it
@@ -5300,13 +5068,12 @@ class Benchmark {
       }
       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
 
-      if (thread->shared->read_rate_limiter.get() != nullptr &&
-          read % 256 == 255) {
+      if (thread->shared->read_rate_limiter.get() != nullptr)
+      //&& read % 256 == 255)
+      {
         thread->shared->read_rate_limiter->Request(
-            256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
+            1, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
       }
-
-      
     }
 
     char msg[100];
@@ -5637,9 +5404,10 @@ class Benchmark {
     int64_t value_max = default_value_max;
     int64_t scan_len_max = FLAGS_mix_max_scan_len;
     double write_rate = 1000.0;
-    double read_rate = 1000.0;
+    double read_rate = 50.0;
     bool use_prefix_modeling = false;
     bool use_random_modeling = false;
+    bool set_rate = false;
     GenerateTwoTermExpKeys gen_exp;
     std::vector<double> ratio{FLAGS_mix_get_ratio, FLAGS_mix_put_ratio,
                               FLAGS_mix_seek_ratio};
@@ -5677,6 +5445,8 @@ class Benchmark {
     }
 
     Duration duration(FLAGS_duration, reads_);
+    uint64_t last_record_time = FLAGS_env->NowMicros();
+    ;
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       int64_t ini_rand, rand_v, key_rand, key_seed;
@@ -5708,8 +5478,10 @@ class Benchmark {
       }
 
       if (FLAGS_sine_mix_rate &&
-          usecs_since_last >
-              (FLAGS_sine_mix_rate_interval_milliseconds * uint64_t{1000})) {
+              usecs_since_last > (FLAGS_sine_mix_rate_interval_milliseconds *
+                                  uint64_t{1000}) ||
+          !set_rate) {
+        set_rate = true;
         double usecs_since_start =
             static_cast<double>(now - thread->stats.GetStart());
         thread->stats.ResetSineInterval();
@@ -5827,11 +5599,6 @@ class Benchmark {
 
     thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
                              get_perf_context()->ToString());
-
-    // if (FLAGS_perf_level > ROCKSDB_NAMESPACE::PerfLevel::kDisable) {
-    //   thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
-    //                            get_perf_context()->ToString());
-    // }
   }
 
   // The social graph workload mixed with Get, Put, Iterator queries.
@@ -6903,12 +6670,14 @@ class Benchmark {
 
   void BGWriter(ThreadState* thread, enum OperationType write_merge) {
     // Special thread that keeps writing until other threads are done.
-    uint64_t tiktok_start=FLAGS_env->NowMicros();
-    uint64_t tiktoks=0;
-    int ratelimites[]={4500*(16+256),9000*(16+256),18000*(16+256),
-              6000*(16+256),36000*(16+256),10000*(16+256),8000*(16+256),1500*(16+256)};
-    int size=8;
-    int index=0;
+    uint64_t tiktok_start = FLAGS_env->NowMicros();
+    uint64_t tiktoks = 0;
+    int ratelimites[] = {4500 * (16 + 256),  9000 * (16 + 256),
+                         18000 * (16 + 256), 6000 * (16 + 256),
+                         36000 * (16 + 256), 10000 * (16 + 256),
+                         8000 * (16 + 256),  1500 * (16 + 256)};
+    int size = 8;
+    int index = 0;
     RandomGenerator gen;
     int64_t bytes = 0;
 
@@ -6972,14 +6741,11 @@ class Benchmark {
             entries_per_batch_ * (value_size_ + key_size_), Env::IO_HIGH,
             nullptr /* stats */, RateLimiter::OpType::kWrite);
       }
-      tiktoks=FLAGS_env->NowMicros()-tiktok_start;
-      if(tiktoks>1000*1000000)
-      {
-        write_rate_limiter->SetBytesPerSecond(5*((9000*(16+256))));
-      }
-      else if(tiktoks>2500*1000000)
-      {
-        write_rate_limiter->SetBytesPerSecond(((18000*(16+256))));
+      tiktoks = FLAGS_env->NowMicros() - tiktok_start;
+      if (tiktoks > 1000 * 1000000) {
+        write_rate_limiter->SetBytesPerSecond(5 * ((9000 * (16 + 256))));
+      } else if (tiktoks > 2500 * 1000000) {
+        write_rate_limiter->SetBytesPerSecond(((18000 * (16 + 256))));
       }
       // // fprintf(stderr,"tiktoks=%ld\n",tiktoks);
       // if(tiktoks>120*1000000)

@@ -700,7 +700,7 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
         tl0slowdown=100;
         tl0stop=120;
       }
-  fprintf(stderr,"\n\n\n num_l0_files=%d\n\n\n\n",num_l0_files);
+  // fprintf(stderr,"\n\n\n num_l0_files=%d\n\n\n\n",num_l0_files);
   if (num_unflushed_memtables >= mutable_cf_options.max_write_buffer_number) {
     // fprintf(stderr,"\n\n\n stop because num_unflushed_memtables \n",num_l0_files);
     return {WriteStallCondition::kStopped, WriteStallCause::kMemtableLimit};
@@ -787,26 +787,26 @@ WriteStallCondition ColumnFamilyData::RecalculateWriteStallConditions(
       ||write_stall_cause==WriteStallCause::kL0FileCountLimit)
       {
         //提升Flush优先级 时间片加0.1秒
-        fprintf(stderr,"cause %d\n",write_stall_cause);
+        // fprintf(stderr,"cause %d\n",write_stall_cause);
         TokenLimiter::TunePriority(Env::IO_SRC_FLUSH_L0COMP,true);
       }
       else
       {
         //提升compaction优先级 时间片加0.1秒
-        fprintf(stderr,"cause %d\n",write_stall_cause);
+        // fprintf(stderr,"cause %d\n",write_stall_cause);
         TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,true);
       }
     }
     else if(write_stall_cause==WriteStallCause::kL0Slow)
     {
       //提升Flush优先级 时间片加0.1秒
-        fprintf(stderr,"cause %d\n",write_stall_cause);
+        // fprintf(stderr,"cause %d\n",write_stall_cause);
         TokenLimiter::TunePriority(Env::IO_SRC_FLUSH_L0COMP,true);
     }
     else if(write_stall_cause==WriteStallCause::kOther)
     {
       //提升compaction优先级 时间片加0.1秒
-        fprintf(stderr,"cause %d\n",write_stall_cause);
+        // fprintf(stderr,"cause %d\n",write_stall_cause);
         TokenLimiter::TunePriority(Env::IO_SRC_COMPACTION,true);
     }
     else

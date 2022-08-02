@@ -300,14 +300,14 @@ void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
   }
   if (add && wait_threshold_us_[io_src] > 0) {
     wait_threshold_us_[io_src] = wait_threshold_us_[io_src] - 100 * 1000;
-    fprintf(stderr, "%d priority now=%lu\n", io_src,
-            wait_threshold_us_[io_src]);
+    // fprintf(stderr, "%d priority now=%lu\n", io_src,
+    //         wait_threshold_us_[io_src]);
     addtimes=0;
   } else {
     wait_threshold_us_[io_src] =
         std::min(wait_threshold_us_[io_src] + 100 * 1000, limits[io_src]);
-    fprintf(stderr, "%d priority now=%lu\n", io_src,
-            wait_threshold_us_[io_src]);
+    // fprintf(stderr, "%d priority now=%lu\n", io_src,
+    //         wait_threshold_us_[io_src]);
     subtimes=0;
   }
 
@@ -315,7 +315,7 @@ void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
   int b=wait_threshold_us_[1];
   int c=wait_threshold_us_[2];
   request_mutex_.Unlock();
-  Prefetcher::RecordLimiterTime(a,b,c);
+  // Prefetcher::RecordLimiterTime(a,b,c);
 
 
 }

@@ -108,7 +108,7 @@ class SstManager {
   }
 };
 
-#define IOPS_MAX 5000
+#define IOPS_MAX 1000
 
 class Prefetcher {
  public:
@@ -126,7 +126,7 @@ class Prefetcher {
   char* buf_ = nullptr;
   bool inited = false;
 
-  bool logRWlat=true;
+  bool logRWlat=false;
 
   static void Init(DBImpl *impl,bool doPrefetch_);
   void _Init(DBImpl *impl,bool doPrefetch_);
@@ -164,7 +164,7 @@ class Prefetcher {
   ~Prefetcher();
    
 
-  const size_t MAXSSTNUM = 10*1036;  // ssd中缓存的sst_blk的最大数目
+  const size_t MAXSSTNUM = 2000;  // ssd中缓存的sst_blk的最大数目
 
   Env* env_ = nullptr;
   mutable port::Mutex lock_;        // synchronization primitive
