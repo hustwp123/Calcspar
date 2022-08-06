@@ -7,6 +7,8 @@
 
 namespace rocksdb {
 
+const size_t MAXSSTNUM = 2000;  // ssd中缓存的sst_blk的最大数目
+
 std::atomic<bool> pauseComapaction;
 
 std::vector<DbPath> db_paths = {
@@ -108,6 +110,7 @@ void Prefetcher::_PrefetcherToMem() {
     return;
   }
   fromKey = cloudManager.getMax();
+  // fprintf(stderr,"ssdManager num %d\n",ssdManager.sstMap.size());
   if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
   {
     lock_.Unlock();

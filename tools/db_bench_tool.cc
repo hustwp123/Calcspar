@@ -1631,7 +1631,6 @@ class ReporterAgent {
     total_ops_done_.fetch_add(num_ops);
   }
 
-
  private:
   std::string Header() const { return "secs_elapsed,interval_qps"; }
   void SleepAndReport() {
@@ -1693,6 +1692,111 @@ class ReporterAgent {
 };
 
 class CombinedStats;
+
+class wpStats {
+ public:
+  // wp
+  uint64_t readdone_ = 0;
+  uint64_t last_report_readdone_ = 0;
+  uint64_t writedone_ = 0;
+  uint64_t last_report_writedone_ = 0;
+  FILE* fp_op_hiccup_report = nullptr;
+  uint64_t start_ = 0;
+  uint64_t mylast_report_finish_=0;
+  std::unordered_map<OperationType, std::shared_ptr<HistogramImpl>,
+                     std::hash<unsigned char>>
+      hist_;
+  uint64_t last_op_finish_=0;
+
+  std::mutex mu_;
+
+  wpStats() {
+    fp_op_hiccup_report = fopen("./test2.log", "a+");
+    if (!fp_op_hiccup_report) {
+      fprintf(stderr, "ERROR! \n");
+    }
+    fprintf(fp_op_hiccup_report,
+            "ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
+            " Lat50th    Lat75th    Lat90th    Lat99th    Lat999th\n");
+    start_ = FLAGS_env->NowMicros();
+  }
+  ~wpStats() {
+    if (fp_op_hiccup_report) {
+      fflush(fp_op_hiccup_report);
+      fclose(fp_op_hiccup_report);
+    }
+  }
+  void FinishedOps(uint64_t micros,int64_t num_ops, enum OperationType op_type = kOthers) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (kWrite == op_type) {  // xp
+      writedone_ += num_ops;
+      if (hist_.find(kWriteHiccup) == hist_.end()) {
+        auto hist_tmp_write_hiccup = std::make_shared<HistogramImpl>();
+        hist_.insert({kWriteHiccup, std::move(hist_tmp_write_hiccup)});
+      }
+      hist_[kWriteHiccup]->Add(micros);
+    } else if (kRead == op_type) {
+      readdone_ += num_ops;
+      if (hist_.find(kReadHiccup) == hist_.end()) {
+        auto hist_tmp_read_hiccup = std::make_shared<HistogramImpl>();
+        hist_.insert({kReadHiccup, std::move(hist_tmp_read_hiccup)});
+      }
+      hist_[kReadHiccup]->Add(micros);
+    }
+
+    uint64_t now=FLAGS_env->NowMicros();
+    int64_t myusecs_since_last = now - mylast_report_finish_;
+    if(myusecs_since_last>1000000)
+    {
+      // write
+        if (hist_.find(kWriteHiccup) != hist_.end()) {
+          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
+                  (now - start_) / 1000000.0,
+                  (writedone_ - last_report_writedone_));
+          fflush(fp_op_hiccup_report);
+          fprintf(fp_op_hiccup_report,
+                  "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                  hist_[kWriteHiccup]->Average(),
+                  hist_[kWriteHiccup]->Percentile(25.0),
+                  hist_[kWriteHiccup]->Percentile(50.0),
+                  hist_[kWriteHiccup]->Percentile(75.0),
+                  hist_[kWriteHiccup]->Percentile(90.0),
+                  hist_[kWriteHiccup]->Percentile(99.0),
+                  hist_[kWriteHiccup]->Percentile(99.9));
+          fflush(fp_op_hiccup_report);
+          hist_[kWriteHiccup]->Clear();
+        }
+
+        // read
+        if (hist_.find(kReadHiccup) != hist_.end()) {
+          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
+                  (now - start_) / 1000000.0,
+                  (readdone_ - last_report_readdone_) );
+          fflush(fp_op_hiccup_report);
+          fprintf(fp_op_hiccup_report,
+                  "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                  hist_[kReadHiccup]->Average(),
+                  hist_[kReadHiccup]->Percentile(25.0),
+                  hist_[kReadHiccup]->Percentile(50.0),
+                  hist_[kReadHiccup]->Percentile(75.0),
+                  hist_[kReadHiccup]->Percentile(90.0),
+                  hist_[kReadHiccup]->Percentile(99.0),
+                  hist_[kReadHiccup]->Percentile(99.9));
+          fflush(fp_op_hiccup_report);
+          hist_[kReadHiccup]->Clear();
+        }
+        last_report_readdone_ = readdone_;
+        last_report_writedone_ = writedone_;
+        mylast_report_finish_ = now;
+    }
+  }
+};
+wpStats wpstat;
+
 class Stats {
  private:
   int id_;
@@ -1704,16 +1808,16 @@ class Stats {
   uint64_t last_report_done_;
 
   // wp
-  uint64_t readdone_;
-  uint64_t last_report_readdone_;
-  uint64_t writedone_;
-  uint64_t last_report_writedone_;
+  uint64_t readdone_ = 0;
+  uint64_t last_report_readdone_ = 0;
+  uint64_t writedone_ = 0;
+  uint64_t last_report_writedone_ = 0;
 
   uint64_t next_report_;
   uint64_t bytes_;
   uint64_t last_op_finish_;
   uint64_t last_report_finish_;
-  uint64_t mylast_report_finish_;
+  uint64_t mylast_report_finish_ = 0;
   std::unordered_map<OperationType, std::shared_ptr<HistogramImpl>,
                      std::hash<unsigned char>>
       hist_;
@@ -1759,10 +1863,10 @@ class Stats {
             op_hiccup_report_fname.c_str());
     fprintf(fp_op_hiccup_report,
             "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
-            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+            " Lat50th    Lat75th    Lat90th    Lat99th    Lat999th\n");
     fprintf(stderr,
             "#tID    ts      op/s    LatMin     LatMax     LatAvg    Lat25th   "
-            " Lat50th    Lat75th    Lat99th    Lat99th    Lat999th\n");
+            " Lat50th    Lat75th    Lat90th    Lat99th    Lat999th\n");
     return true;
   }
 
@@ -2028,67 +2132,50 @@ class Stats {
         last_report_writedone_ = writedone_;
         mylast_report_finish_ = now;
       }
+    }
 
-      if (done_ >= next_report_) {
-        if (!FLAGS_stats_interval) {
-          if (next_report_ < 1000)
-            next_report_ += 100;
-          else if (next_report_ < 5000)
-            next_report_ += 500;
-          else if (next_report_ < 10000)
-            next_report_ += 1000;
-          else if (next_report_ < 50000)
-            next_report_ += 5000;
-          else if (next_report_ < 100000)
-            next_report_ += 10000;
-          else if (next_report_ < 500000)
-            next_report_ += 50000;
-          else
-            next_report_ += 100000;
-          fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
-        } else {
-          uint64_t now = FLAGS_env->NowMicros();
-          int64_t usecs_since_last = now - last_report_finish_;
+    if (done_ >= next_report_) {
+      if (!FLAGS_stats_interval) {
+        if (next_report_ < 1000)
+          next_report_ += 100;
+        else if (next_report_ < 5000)
+          next_report_ += 500;
+        else if (next_report_ < 10000)
+          next_report_ += 1000;
+        else if (next_report_ < 50000)
+          next_report_ += 5000;
+        else if (next_report_ < 100000)
+          next_report_ += 10000;
+        else if (next_report_ < 500000)
+          next_report_ += 50000;
+        else
+          next_report_ += 100000;
+        fprintf(stderr, "... finished %" PRIu64 " ops%30s\r", done_, "");
+      } else {
+        uint64_t now = FLAGS_env->NowMicros();
+        int64_t usecs_since_last = now - last_report_finish_;
 
-          // Determine whether to print status where interval is either
-          // each N operations or each N seconds.
+        // Determine whether to print status where interval is either
+        // each N operations or each N seconds.
 
-          if (FLAGS_stats_interval_seconds &&
-              usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
-            // Don't check again for this many operations
-            next_report_ += FLAGS_stats_interval;
-          }
+        if (FLAGS_stats_interval_seconds &&
+            usecs_since_last < (FLAGS_stats_interval_seconds * 1000000)) {
+          // Don't check again for this many operations
+          next_report_ += FLAGS_stats_interval;
+        }
 
-          if (id_ == 0 && FLAGS_stats_per_interval) {
-            std::string stats;
+        if (id_ == 0 && FLAGS_stats_per_interval) {
+          std::string stats;
 
-            if (db_with_cfh && db_with_cfh->num_created.load()) {
-              for (size_t i = 0; i < db_with_cfh->num_created.load(); ++i) {
-                if (db->GetProperty(db_with_cfh->cfh[i], "rocksdb.cfstats",
-                                    &stats))
-                  fprintf(stderr, "%s\n", stats.c_str());
-                if (FLAGS_show_table_properties) {
-                  for (int level = 0; level < FLAGS_num_levels; ++level) {
-                    if (db->GetProperty(
-                            db_with_cfh->cfh[i],
-                            "rocksdb.aggregated-table-properties-at-level" +
-                                ToString(level),
-                            &stats)) {
-                      if (stats.find("# entries=0") == std::string::npos) {
-                        fprintf(stderr, "Level[%d]: %s\n", level,
-                                stats.c_str());
-                      }
-                    }
-                  }
-                }
-              }
-            } else if (db) {
-              if (db->GetProperty("rocksdb.stats", &stats)) {
+          if (db_with_cfh && db_with_cfh->num_created.load()) {
+            for (size_t i = 0; i < db_with_cfh->num_created.load(); ++i) {
+              if (db->GetProperty(db_with_cfh->cfh[i], "rocksdb.cfstats",
+                                  &stats))
                 fprintf(stderr, "%s\n", stats.c_str());
-              }
               if (FLAGS_show_table_properties) {
                 for (int level = 0; level < FLAGS_num_levels; ++level) {
                   if (db->GetProperty(
+                          db_with_cfh->cfh[i],
                           "rocksdb.aggregated-table-properties-at-level" +
                               ToString(level),
                           &stats)) {
@@ -2099,18 +2186,34 @@ class Stats {
                 }
               }
             }
+          } else if (db) {
+            if (db->GetProperty("rocksdb.stats", &stats)) {
+              fprintf(stderr, "%s\n", stats.c_str());
+            }
+            if (FLAGS_show_table_properties) {
+              for (int level = 0; level < FLAGS_num_levels; ++level) {
+                if (db->GetProperty(
+                        "rocksdb.aggregated-table-properties-at-level" +
+                            ToString(level),
+                        &stats)) {
+                  if (stats.find("# entries=0") == std::string::npos) {
+                    fprintf(stderr, "Level[%d]: %s\n", level, stats.c_str());
+                  }
+                }
+              }
+            }
           }
-
-          next_report_ += FLAGS_stats_interval;
-          last_report_finish_ = now;
-          last_report_done_ = done_;
         }
+
+        next_report_ += FLAGS_stats_interval;
+        last_report_finish_ = now;
+        last_report_done_ = done_;
       }
-      if (id_ == 0 && FLAGS_thread_status_per_interval) {
-        PrintThreadStatus();
-      }
-      fflush(stderr);
     }
+    if (id_ == 0 && FLAGS_thread_status_per_interval) {
+      PrintThreadStatus();
+    }
+    fflush(stderr);
   }
 
   void AddBytes(int64_t n) { bytes_ += n; }
@@ -5446,7 +5549,6 @@ class Benchmark {
 
     Duration duration(FLAGS_duration, reads_);
     uint64_t last_record_time = FLAGS_env->NowMicros();
-    ;
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       int64_t ini_rand, rand_v, key_rand, key_seed;
@@ -5465,8 +5567,13 @@ class Benchmark {
         Random64 rand(key_seed);
         key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
       }
-      GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+
       int query_type = query.GetType(rand_v);
+      if (query_type == 1) {
+        GenerateKeyFromInt(ini_rand, FLAGS_num, &key);
+      } else {
+        GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      }
 
       // change the qps
       uint64_t now = FLAGS_env->NowMicros();
@@ -5502,6 +5609,8 @@ class Benchmark {
       // Start the query
       if (query_type == 0) {
         thread->stats.ResetLastOpTime();
+
+        uint64_t start = FLAGS_env->NowMicros();
         // the Get query
         gets++;
         if (FLAGS_num_column_families > 1) {
@@ -5521,14 +5630,19 @@ class Benchmark {
           fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
           abort();
         }
+        uint64_t micros=FLAGS_env->NowMicros()-start;
+        wpstat.FinishedOps(micros,1,kRead);
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
-        if (thread->shared->read_rate_limiter && (gets + seek) % 100 == 0) {
-          thread->shared->read_rate_limiter->Request(100, Env::IO_HIGH,
-                                                     nullptr /*stats*/);
-        }
+        thread->shared->read_rate_limiter->Request(1, Env::IO_HIGH,
+                                                   nullptr /*stats*/);
+        // if (thread->shared->read_rate_limiter && (gets + seek) % 4 == 0) {
+        //   thread->shared->read_rate_limiter->Request(4, Env::IO_HIGH,
+        //                                              nullptr /*stats*/);
+        // }
 
       } else if (query_type == 1) {
         thread->stats.ResetLastOpTime();
+        uint64_t start = FLAGS_env->NowMicros();
         // the Put query
         puts++;
         int64_t val_size = ParetoCdfInversion(u, FLAGS_value_theta,
@@ -5547,12 +5661,16 @@ class Benchmark {
           fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           exit(1);
         }
+        uint64_t micros=FLAGS_env->NowMicros()-start;
+        wpstat.FinishedOps(micros,1,kWrite);
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
+        thread->shared->write_rate_limiter->Request(1, Env::IO_HIGH,
+                                                    nullptr /*stats*/);
 
-        if (thread->shared->write_rate_limiter && puts % 100 == 0) {
-          thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
-                                                      nullptr /*stats*/);
-        }
+        // if (thread->shared->write_rate_limiter && puts % 100 == 0) {
+        //   thread->shared->write_rate_limiter->Request(100, Env::IO_HIGH,
+        //                                               nullptr /*stats*/);
+        // }
 
       } else if (query_type == 2) {
         thread->stats.ResetLastOpTime();

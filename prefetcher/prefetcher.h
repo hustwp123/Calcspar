@@ -164,7 +164,7 @@ class Prefetcher {
   ~Prefetcher();
    
 
-  const size_t MAXSSTNUM = 2000;  // ssd中缓存的sst_blk的最大数目
+  
 
   Env* env_ = nullptr;
   mutable port::Mutex lock_;        // synchronization primitive
