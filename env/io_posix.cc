@@ -351,6 +351,9 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
     if(io_src == Env::IOSource::IO_SRC_COMPACTION){
       Monitor::CollectIO(3,requestNum);
     }
+    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
+      Monitor::CollectIO(6,requestNum);
+    }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
@@ -512,6 +515,9 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
     }
     if(io_src == Env::IOSource::IO_SRC_COMPACTION){
       Monitor::CollectIO(3,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
+      Monitor::CollectIO(6,requestNum);
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);   
@@ -1199,6 +1205,9 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
     }
     if(io_src == Env::IOSource::IO_SRC_COMPACTION){
       Monitor::CollectIO(3,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
+      Monitor::CollectIO(6,requestNum);
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);
