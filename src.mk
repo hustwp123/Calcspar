@@ -225,6 +225,7 @@ LIB_SOURCES =                                                   \
   utilities/write_batch_with_index/write_batch_with_index.cc    \
   utilities/write_batch_with_index/write_batch_with_index_internal.cc    \
   prefetcher/prefetcher.cc  \
+  zyh/monitor.cc            \
 
 ifeq ($(ARMCRC_SOURCE),1)
 LIB_SOURCES +=\

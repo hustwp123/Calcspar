@@ -9,6 +9,8 @@
 
 #include "util/token_limiter.h"
 #include "prefetcher/prefetcher.h"
+#include "zyh/monitor.h"
+
 #ifdef ROCKSDB_LIB_IO_POSIX
 #include "env/io_posix.h"
 #include <errno.h>
@@ -78,6 +80,12 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
     {
       requestNum++;
     }
+    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) { 
+      Monitor::CollectIO(2,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
+      Monitor::CollectIO(4,requestNum);
+    }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
                                       requestNum);
     uint64_t begin=Prefetcher::now();
@@ -113,6 +121,12 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
     if(io_src==Env::IOSource::IO_SRC_DEFAULT)
     {
       io_src=Env::IOSource::IO_SRC_USER;
+    }
+    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) { 
+      Monitor::CollectIO(2,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
+      Monitor::CollectIO(4,requestNum);
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
                                       requestNum);
@@ -331,6 +345,12 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
     {
       requestNum++;
     }
+    if(io_src == Env::IOSource::IO_SRC_USER) { 
+      Monitor::CollectIO(1,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
+      Monitor::CollectIO(3,requestNum);
+    }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
@@ -486,6 +506,12 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
     if(io_src==Env::IOSource::IO_SRC_DEFAULT)
     {
       io_src=Env::IOSource::IO_SRC_USER;
+    }
+    if(io_src == Env::IOSource::IO_SRC_USER) { 
+      Monitor::CollectIO(1,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
+      Monitor::CollectIO(3,requestNum);
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);   
@@ -1167,6 +1193,12 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
     if(left % (256 * 1024)!=0)
     {
       requestNum++;
+    }
+    if(io_src == Env::IOSource::IO_SRC_USER) { 
+      Monitor::CollectIO(1,requestNum);
+    }
+    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
+      Monitor::CollectIO(3,requestNum);
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
                                       requestNum);
