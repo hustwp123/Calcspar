@@ -286,13 +286,13 @@ void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
     request_mutex_.Unlock();
     return;
   }
-  if(add&&addtimes<5)
+  if(add&&addtimes<2)
   {
     addtimes++;
     request_mutex_.Unlock();
     return;
   }
-  if(!add&&subtimes<10)
+  if(!add&&subtimes<5)
   {
     subtimes++;
     request_mutex_.Unlock();

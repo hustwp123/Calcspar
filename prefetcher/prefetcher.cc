@@ -5,6 +5,8 @@
 #include "db/db_impl/db_impl.h"
 #include "util/token_limiter.h"
 
+#include "zyh/monitor.h"
+
 namespace rocksdb {
 
 const size_t MAXSSTNUM = 2000;  // ssd中缓存的sst_blk的最大数目
@@ -153,6 +155,7 @@ void Prefetcher::_PrefetcherToMem() {
   TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
                                     TokenLimiter::kRead);
   int ret = pread(readfd, buf_, 256 * 1024, offset);
+  Monitor::CollectIO(6,1);
   if (ret == -1) {
     fprintf(stderr, "pread error\n");
     close(readfd);
@@ -270,6 +273,7 @@ void Prefetcher::_Prefetcher() {
   TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
                                     TokenLimiter::kRead);
   int ret = pread(readfd, buf_, 256 * 1024, offset);
+  Monitor::CollectIO(6,1);
   if (ret == -1) {
     fprintf(stderr, "pread error\n");
     close(readfd);
@@ -637,9 +641,10 @@ void Prefetcher::latency_hiccup_size() {
 void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
                              size_t size)  // op : 1read 2write
 {
-  if (!logRWlat) {
-    return;
-  }
+
+  // if (!logRWlat) {
+  //   return;
+  // }
   lock_rw.Lock();
   if (tx_xtime > 3600000000) {
     fprintf(stderr, "too large tx_xtime");
@@ -650,11 +655,11 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
     num++;
   }
   if (op == 1) {
-    hdr_record_value(hdr_last_1s_read, tx_xtime);
-    hdr_record_value(hdr_last_1s_size, size);
+    // hdr_record_value(hdr_last_1s_read, tx_xtime);
+    // hdr_record_value(hdr_last_1s_size, size);
     readiops += num;
   } else if (op == 2) {
-    hdr_record_value(hdr_last_1s_write, tx_xtime);
+    // hdr_record_value(hdr_last_1s_write, tx_xtime);
     writeiops += num;
   }
   tiktoks = now() - tiktok_start;
@@ -666,36 +671,39 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
       latency_hiccup_size();
     }
     // fprintf(stderr, "paused=%d\n", paused);
-    // if (lastIOPS.size() < 10) {
-    //   lastIOPS.push_back(readiops);
-    // } else {
-    //   lastIOPS.pop_front();
-    //   lastIOPS.push_back(readiops);
-    //   int allIOPS = 0;
-    //   for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
-    //     allIOPS += *i;
-    //   }
-    //   fprintf(stderr, "allIOPS=%d size=%d\n", allIOPS, lastIOPS.size());
-    //   bool t = pauseComapaction.load();
-    //   if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.8 && !t) {
-    //     pauseComapaction.store(true);
-    //     fprintf(stderr, "pauseComapaction from false to true\n");
-    //     if (!paused) {
-    //       fprintf(stderr, "stop compaction 0\n\n\n");
-    //       impl_->PauseBackgroundWork();
-    //       paused = true;
-    //       fprintf(stderr, "stop compaction\n\n\n");
-    //     }
-    //   } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.8 && t) {
-    //     pauseComapaction.store(false);
-    //     fprintf(stderr, "pauseComapaction from true to false\n");
-    //     if (paused) {
-    //       impl_->ContinueBackgroundWork();
-    //       paused = false;
-    //       fprintf(stderr, "continue compaction\n\n\n");
-    //     }
-    //   }
-    // }
+    if (lastIOPS.size() < 10) {
+      lastIOPS.push_back(readiops);
+    } else {
+      lastIOPS.pop_front();
+      lastIOPS.push_back(readiops);
+      int allIOPS = 0;
+      for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
+        allIOPS += *i;
+      }
+      // fprintf(stderr, "allIOPS=%d size=%d\n", allIOPS, lastIOPS.size());
+      bool t = pauseComapaction.load();
+      if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.9 && !t) {
+        // fprintf(stderr, "pauseComapaction from false to true\n");
+        if (!paused) {
+          // fprintf(stderr, "stop compaction 0\n\n\n");
+          Status status=impl_->PauseBackgroundWork();
+          if(status==Status::OK())
+          {
+            pauseComapaction.store(true);
+            paused = true;
+          }
+          // fprintf(stderr, "stop compaction\n\n\n");
+        }
+      } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.9 && t) {
+        // fprintf(stderr, "pauseComapaction from true to false\n");
+        if (paused) {
+          impl_->ContinueBackgroundWork();
+          paused = false;
+          pauseComapaction.store(false);
+          // fprintf(stderr, "continue compaction\n\n\n");
+        }
+      }
+    }
 
     tiktok_start = now();
     readiops = 0;

@@ -1091,7 +1091,8 @@ Status DBImpl::PauseBackgroundWork() {
   InstrumentedMutexLock guard_lock(&mutex_);
   while (bg_bottom_compaction_scheduled_ > 0 || bg_compaction_scheduled_ > 0 ||
          bg_flush_scheduled_ > 0) {
-    bg_cv_.Wait();
+    return Status::Busy();
+    // bg_cv_.Wait();
   }
   bg_compaction_paused_++;
   // bg_work_paused_++;
@@ -1100,11 +1101,6 @@ Status DBImpl::PauseBackgroundWork() {
 
 Status DBImpl::ContinueBackgroundWork() {
   InstrumentedMutexLock guard_lock(&mutex_);
-  // if (bg_work_paused_ == 0) {
-  //   return Status::InvalidArgument();
-  // }
-  // assert(bg_work_paused_ > 0);
-  // assert(bg_compaction_paused_ > 0);
   if(bg_compaction_paused_>0)
   {
     bg_compaction_paused_--;

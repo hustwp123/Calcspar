@@ -28,10 +28,10 @@ void Monitor::_Init() {
       exit(1);
     }
 
-    fprintf(log_, "time ALLIOPS   Ur   Fw    Cr   Cw   Fr\n");
+    fprintf(log_, "time ALLIOPS   Ur   Fw    Cr   Cw   Fr  Prefetch\n");
 
     io_lock_.lock();
-    for(int i=0;i<6;i++)
+    for(int i=0;i<7;i++)
       io_.push_back(0);
     io_lock_.unlock();
 
@@ -46,7 +46,7 @@ void Monitor::_print(){
     sleep(1);
     io_lock_.lock();
       fprintf(log_,"%d  ",t);
-      for(int i=0;i<6;i++){
+      for(int i=0;i<7;i++){
         fprintf(log_,"%d  ",io_[i]);
         io_[i]=0;
       }

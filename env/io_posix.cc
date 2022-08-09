@@ -7,15 +7,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include "util/token_limiter.h"
 #include "prefetcher/prefetcher.h"
+#include "util/token_limiter.h"
 #include "zyh/monitor.h"
 
 #ifdef ROCKSDB_LIB_IO_POSIX
-#include "env/io_posix.h"
 #include <errno.h>
 #include <fcntl.h>
+
 #include <algorithm>
+
+#include "env/io_posix.h"
 #if defined(OS_LINUX)
 #include <linux/fs.h>
 #endif
@@ -72,25 +74,28 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
   const char* src = buf;
   size_t left = nbyte;
 
+  int requestNum2 = left / (256 * 1024);
+  if (left % (256 * 1024) != 0) {
+    requestNum2++;
+  }
+  if (io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) {
+    Monitor::CollectIO(2, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_COMPACTION) {
+    Monitor::CollectIO(4, requestNum2);
+  }
+
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
 
-    int requestNum=left / (256 * 1024);
-    if(left % (256 * 1024)!=0)
-    {
+    int requestNum = left / (256 * 1024);
+    if (left % (256 * 1024) != 0) {
       requestNum++;
     }
-    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) { 
-      Monitor::CollectIO(2,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
-      Monitor::CollectIO(4,requestNum);
-    }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
-                                      requestNum);
-    uint64_t begin=Prefetcher::now();
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite, requestNum);
+    uint64_t begin = Prefetcher::now();
     ssize_t done = write(fd, src, bytes_to_write);
-    uint64_t end=Prefetcher::now();
+    uint64_t end = Prefetcher::now();
     // Prefetcher::RecordTime(2,(end-begin)/1000,left);
     if (done < 0) {
       if (errno == EINTR) {
@@ -110,30 +115,30 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
 
   const char* src = buf;
   size_t left = nbyte;
-  
+
+  int requestNum2 = nbyte / (256 * 1024);
+  if (left % (256 * 1024) != 0) {
+    requestNum2++;
+  }
+
+  if (io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) {
+    Monitor::CollectIO(2, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_COMPACTION) {
+    Monitor::CollectIO(4, requestNum2);
+  }
+
   while (left != 0) {
     size_t bytes_to_write = std::min(left, kLimit1Gb);
-    int requestNum=bytes_to_write / (256 * 1024);
-    if(left % (256 * 1024)!=0)
-    {
+    int requestNum = bytes_to_write / (256 * 1024);
+    if (left % (256 * 1024) != 0) {
       requestNum++;
     }
-    if(io_src==Env::IOSource::IO_SRC_DEFAULT)
-    {
-      io_src=Env::IOSource::IO_SRC_USER;
-    }
-    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) { 
-      Monitor::CollectIO(2,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
-      Monitor::CollectIO(4,requestNum);
-    }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite,
-                                      requestNum);
-    uint64_t begin=Prefetcher::now();
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite, requestNum);
+    uint64_t begin = Prefetcher::now();
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
-    uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(2,(end-begin)/1000,bytes_to_write);
+    uint64_t end = Prefetcher::now();
+    Prefetcher::RecordTime(2, (end - begin) / 1000, bytes_to_write);
     if (done < 0) {
       if (errno == EINTR) {
         continue;
@@ -339,23 +344,26 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
   ssize_t r = -1;
   size_t left = n;
   char* ptr = scratch;
+  int requestNum2 = left / (256 * 1024);
+  if (left % (256 * 1024) != 0) {
+    requestNum2++;
+  }
+  if (io_src == Env::IOSource::IO_SRC_USER) {
+    Monitor::CollectIO(1, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_COMPACTION) {
+    Monitor::CollectIO(3, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) {
+    Monitor::CollectIO(5, requestNum2);
+  }
+
   while (left > 0) {
-    int requestNum=left / (256 * 1024);
-    if(left % (256 * 1024)!=0)
-    {
+    int requestNum = left / (256 * 1024);
+    if (left % (256 * 1024) != 0) {
       requestNum++;
     }
-    if(io_src == Env::IOSource::IO_SRC_USER) { 
-      Monitor::CollectIO(1,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
-      Monitor::CollectIO(3,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
-      Monitor::CollectIO(6,requestNum);
-    }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
-                                      requestNum);
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
@@ -480,52 +488,52 @@ PosixRandomAccessFile::~PosixRandomAccessFile() { close(fd_); }
 
 Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
                                    char* scratch, Env::IOSource io_src) const {
-  uint64_t sst_id=TableFileNameToNumber(filename_);
-  Prefetcher::SstRead(sst_id,offset,n,true);
+  uint64_t sst_id = TableFileNameToNumber(filename_);
+  Prefetcher::SstRead(sst_id, offset, n, true);
   if (use_direct_io()) {
     assert(IsSectorAligned(offset, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(n, GetRequiredBufferAlignment()));
     assert(IsSectorAligned(scratch, GetRequiredBufferAlignment()));
   }
-  // fprintf(stderr,"%d  %d   %d\n",GetRequiredBufferAlignment(),GetRequiredBufferAlignment(),GetRequiredBufferAlignment());
+  // fprintf(stderr,"%d  %d
+  // %d\n",GetRequiredBufferAlignment(),GetRequiredBufferAlignment(),GetRequiredBufferAlignment());
   Status s;
-  size_t myleft=Prefetcher::TryGetFromPrefetcher(sst_id,offset,n,scratch);
-  if(myleft!=n+1)
-  {
+  size_t myleft = Prefetcher::TryGetFromPrefetcher(sst_id, offset, n, scratch);
+  if (myleft != n + 1) {
     // fprintf(stderr,"read from cache\n");
-    *result = Slice(scratch,  n - myleft);
+    *result = Slice(scratch, n - myleft);
     return s;
   }
-  
+
   ssize_t r = -1;
   size_t left = n;
   char* ptr = scratch;
+  int requestNum2 = left / (256 * 1024);
+  if (left % (256 * 1024) != 0) {
+    requestNum2++;
+  }
+
+  if (io_src == Env::IOSource::IO_SRC_USER) {
+    Monitor::CollectIO(1, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_COMPACTION) {
+    Monitor::CollectIO(3, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) {
+    Monitor::CollectIO(5, requestNum2);
+  }
+
   while (left > 0) {
-    int requestNum=left / (256 * 1024);
-    if(left % (256 * 1024)!=0)
-    {
+    int requestNum = left / (256 * 1024);
+    if (left % (256 * 1024) != 0) {
       requestNum++;
     }
-    if(io_src==Env::IOSource::IO_SRC_DEFAULT)
-    {
-      io_src=Env::IOSource::IO_SRC_USER;
-    }
-    if(io_src == Env::IOSource::IO_SRC_USER) { 
-      Monitor::CollectIO(1,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
-      Monitor::CollectIO(3,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
-      Monitor::CollectIO(6,requestNum);
-    }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
-                                      requestNum);   
-    uint64_t begin=Prefetcher::now();
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
+    uint64_t begin = Prefetcher::now();
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
-    uint64_t end=Prefetcher::now();
-    Prefetcher::RecordTime(1,(end-begin)/1000,left);
-    
+    uint64_t end = Prefetcher::now();
+    Prefetcher::RecordTime(1, (end - begin) / 1000, left);
+
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
         continue;
@@ -1194,23 +1202,25 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
                                char* scratch, Env::IOSource io_src) const {
   size_t left = n;
   char* ptr = scratch;
+  int requestNum2 = left / (256 * 1024);
+  if (left % (256 * 1024) != 0) {
+    requestNum2++;
+  }
+  if (io_src == Env::IOSource::IO_SRC_USER) {
+    Monitor::CollectIO(1, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_COMPACTION) {
+    Monitor::CollectIO(3, requestNum2);
+  }
+  if (io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP) {
+    Monitor::CollectIO(5, requestNum2);
+  }
   while (left > 0) {
-    int requestNum=left / (256 * 1024);
-    if(left % (256 * 1024)!=0)
-    {
+    int requestNum = left / (256 * 1024);
+    if (left % (256 * 1024) != 0) {
       requestNum++;
     }
-    if(io_src == Env::IOSource::IO_SRC_USER) { 
-      Monitor::CollectIO(1,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_COMPACTION){
-      Monitor::CollectIO(3,requestNum);
-    }
-    if(io_src == Env::IOSource::IO_SRC_FLUSH_L0COMP){
-      Monitor::CollectIO(6,requestNum);
-    }
-    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead,
-                                      requestNum);
+    TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
     ssize_t done = pread(fd_, ptr, left, offset);
     if (done < 0) {
       // error while reading from file
