@@ -1185,6 +1185,7 @@ Status DBImpl::WriteLevel0TableForRecovery(int job_id, ColumnFamilyData* cfd,
 }
 
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
+  fprintf(stderr,"test123\n");
   DBOptions db_options(options);
   ColumnFamilyOptions cf_options(options);
   std::vector<ColumnFamilyDescriptor> column_families;
@@ -1196,6 +1197,9 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   }
   std::vector<ColumnFamilyHandle*> handles;
   Status s = DB::Open(db_options, dbname, column_families, &handles, dbptr);
+  BlockBasedTableOptions* table_options=(BlockBasedTableOptions*)options.table_factory->GetOptions();
+  Prefetcher::SetOptions(table_options);
+  
   if (s.ok()) {
     if (db_options.persist_stats_to_disk) {
       assert(handles.size() == 2);
@@ -1325,10 +1329,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
 
   Monitor::Init();
 
+  // Prefetcher::Init(impl,false);
+
   Prefetcher::Init(impl,true);
   TokenLimiter::SetDefaultInstance(
-      std::unique_ptr<TokenLimiter>(new TokenLimiter(990)));
-
+      std::unique_ptr<TokenLimiter>(new TokenLimiter(1000)));
 
 
   impl->mutex_.Lock();

@@ -91,7 +91,7 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
+      wait_threshold_us_{500 * 1000, 700 * 1000, 500 * 1000, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),

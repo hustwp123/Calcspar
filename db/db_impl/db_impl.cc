@@ -35,9 +35,9 @@
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
 #include "db/external_sst_file_ingestion_job.h"
-#include "db/import_column_family_job.h"
 #include "db/flush_job.h"
 #include "db/forward_iterator.h"
+#include "db/import_column_family_job.h"
 #include "db/job_context.h"
 #include "db/log_reader.h"
 #include "db/log_writer.h"
@@ -71,6 +71,7 @@
 #include "options/options_helper.h"
 #include "options/options_parser.h"
 #include "port/port.h"
+#include "prefetcher/prefetcher.h"
 #include "rocksdb/cache.h"
 #include "rocksdb/compaction_filter.h"
 #include "rocksdb/convenience.h"
@@ -100,8 +101,6 @@
 #include "util/mutexlock.h"
 #include "util/stop_watch.h"
 #include "util/string_util.h"
-
-#include "prefetcher/prefetcher.h"
 
 namespace rocksdb {
 const std::string kDefaultColumnFamilyName("default");
@@ -1043,7 +1042,7 @@ Status DBImpl::SetDBOptions(
       env_options_for_compaction_ = env_->OptimizeForCompactionTableWrite(
           env_options_for_compaction_, immutable_db_options_);
       versions_->ChangeEnvOptions(mutable_db_options_);
-      //TODO(xiez): clarify why apply optimize for read to write options
+      // TODO(xiez): clarify why apply optimize for read to write options
       env_options_for_compaction_ = env_->OptimizeForCompactionTableRead(
           env_options_for_compaction_, immutable_db_options_);
       env_options_for_compaction_.compaction_readahead_size =
@@ -1424,7 +1423,7 @@ InternalIterator* DBImpl::NewInternalIterator(const ReadOptions& read_options,
     IterState* cleanup =
         new IterState(this, &mutex_, super_version,
                       read_options.background_purge_on_iterator_cleanup ||
-                      immutable_db_options_.avoid_unnecessary_blocking_io);
+                          immutable_db_options_.avoid_unnecessary_blocking_io);
     internal_iter->RegisterCleanup(CleanupIteratorState, cleanup, nullptr);
 
     return internal_iter;
@@ -1526,6 +1525,13 @@ Status DBImpl::GetImpl(const ReadOptions& ro, ColumnFamilyHandle* column_family,
   // s is both in/out. When in, s could either be OK or MergeInProgress.
   // merge_operands will contain the sequence of merges in the latter case.
   LookupKey lkey(key, snapshot, read_options.timestamp);
+  bool useKVCache=false;
+  // bool useKVCache = true;
+
+  Slice cache_key_slice = lkey.internal_key();
+  std::string cache_key;
+  cache_key.assign(cache_key_slice.data(), cache_key_slice.size());
+
   PERF_TIMER_STOP(get_snapshot_time);
 
   bool skip_memtable = (read_options.read_tier == kPersistedTier &&
@@ -1551,12 +1557,42 @@ Status DBImpl::GetImpl(const ReadOptions& ro, ColumnFamilyHandle* column_family,
       return s;
     }
   }
+
   if (!done) {
+    if (useKVCache) {
+      // fprintf(stderr,"key:%s\n",cache_key.c_str());
+      Prefetcher::KVcacheTryGet();
+      std::string t = Prefetcher::CacheGet(cache_key);
+      if (t != "notfound42316589/72") {
+        Prefetcher::KVcacheGet();
+        if(t.size()<1000)
+        {
+          fprintf(stderr,"hit size %d \n",t.size());
+        }
+        auto re = pinnable_val->GetSelf();
+        *re = t;
+        pinnable_val->PinSelf();
+        return s;
+      }
+    }
     PERF_TIMER_GUARD(get_from_output_files_time);
     sv->current->Get(read_options, lkey, pinnable_val, &s, &merge_context,
                      &max_covering_tombstone_seq, value_found, nullptr, nullptr,
                      callback, is_blob_index);
     RecordTick(stats_, MEMTABLE_MISS);
+
+    if (useKVCache && s.ok()) {
+      std::string cache_value;
+      cache_value.assign(pinnable_val->data(), pinnable_val->size());
+      if(cache_value.size()>1100)
+      {
+        fprintf(stderr,"error size=%d\n",cache_value.size());
+      }
+
+      // fprintf(stderr,"cache_key size %d key size %d cache_value size %d size
+      // %d\n",cache_key.size(),cache_key_slice.size(),cache_value.size(),pinnable_val->size());
+      Prefetcher::CachePut(cache_key, cache_value);
+    }
   }
 
   {
@@ -1816,7 +1852,7 @@ void DBImpl::MultiGetImpl(
     for (KeyContext& key : key_context) {
 #ifndef NDEBUG
       if (index > 0 && sorted_input) {
-        KeyContext* lhs = &key_context[index-1];
+        KeyContext* lhs = &key_context[index - 1];
         KeyContext* rhs = &key_context[index];
         const Comparator* comparator = cfd->user_comparator();
         int cmp = comparator->Compare(*(lhs->key), *(rhs->key));
@@ -3229,9 +3265,8 @@ Status DestroyDB(const std::string& dbname, const Options& options,
         if (type == kMetaDatabase) {
           del = DestroyDB(path_to_delete, options);
         } else if (type == kTableFile || type == kLogFile) {
-          del =
-              DeleteDBFile(&soptions, path_to_delete, dbname,
-                           /*force_bg=*/false, /*force_fg=*/!wal_in_db_path);
+          del = DeleteDBFile(&soptions, path_to_delete, dbname,
+                             /*force_bg=*/false, /*force_fg=*/!wal_in_db_path);
         } else {
           del = env->DeleteFile(path_to_delete);
         }
@@ -3944,8 +3979,7 @@ Status DBImpl::IngestExternalFiles(
 Status DBImpl::CreateColumnFamilyWithImport(
     const ColumnFamilyOptions& options, const std::string& column_family_name,
     const ImportColumnFamilyOptions& import_options,
-    const ExportImportFilesMetaData& metadata,
-    ColumnFamilyHandle** handle) {
+    const ExportImportFilesMetaData& metadata, ColumnFamilyHandle** handle) {
   assert(handle != nullptr);
   assert(*handle == nullptr);
   std::string cf_comparator_name = options.comparator->Name();
@@ -3986,8 +4020,7 @@ Status DBImpl::CreateColumnFamilyWithImport(
       // reuse the file number that has already assigned to the internal file,
       // and this will overwrite the external file. To protect the external
       // file, we have to make sure the file number will never being reused.
-      next_file_number =
-          versions_->FetchAddFileNumber(metadata.files.size());
+      next_file_number = versions_->FetchAddFileNumber(metadata.files.size());
       auto cf_options = cfd->GetLatestMutableCFOptions();
       status = versions_->LogAndApply(cfd, *cf_options, &dummy_edit, &mutex_,
                                       directories_.GetDbDir());

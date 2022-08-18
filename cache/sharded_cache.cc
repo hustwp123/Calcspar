@@ -54,8 +54,14 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
 }
 
 Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
+  Prefetcher::blkcacheTryGet();
   uint32_t hash = HashSlice(key);
-  return GetShard(Shard(hash))->Lookup(key, hash);
+  Handle* t=GetShard(Shard(hash))->Lookup(key, hash);
+  if(t!=nullptr)
+  {
+    Prefetcher::blkcacheGet();
+  }
+  return t;
 }
 
 bool ShardedCache::Ref(Handle* handle) {
