@@ -11,7 +11,7 @@ namespace rocksdb {
 
 
 const int blkSize = 256 * 1024;
-const uint64_t CacheSize=1300*1024*1024;
+const uint64_t CacheSize=500*1024*1024;
 const size_t MAXSSTNUM =  (CacheSize)/(blkSize);  // ssd中缓存的sst_blk的最大数目
 
 std::atomic<bool> pauseComapaction;
@@ -154,19 +154,13 @@ void Prefetcher::_PrefetcherToMem() {
     return;
   }
   fromKey = cloudManager.getMax();
-  // if(cloudManager.sstMap[fromKey]->get_times<=2)
-  // {
-  //   lock_.Unlock();
-  //   return;
-  // }
+  if(cloudManager.sstMap[fromKey]->get_times<=1.01)
+  {
+    lock_.Unlock();
+    return;
+  }
   // fprintf(stderr,"get_times=%lf\n",cloudManager.sstMap[fromKey]->get_times);
 
-  
-
-  // if(cloudManager.sstMap[fromKey]->get_times==0)
-  // {
-  //   fprintf(stderr,"get_times=%d\n",cloudManager.sstMap[fromKey]->get_times);
-  // }
   
   // fprintf(stderr,"ssdManager num %d\n",ssdManager.sstMap.size());
   if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
@@ -531,14 +525,14 @@ void Prefetcher::_CaluateSstHeat() {
       p->get_times = (p->get_times)/2 ;
     }
   }
-  // calcuTimes++;
-  // if(calcuTimes>=10)
-  // {
-  //   calcuTimes=0;
-  //   uint64_t size=CacheSize-(ssdManager.sstMap.size()*blkSize);
-  //   options_->block_cache->SetCapacity(size);
-  //   fprintf(stderr,"blkcache size=%d\n",size);
-  // }
+  calcuTimes++;
+  if(calcuTimes>=10)
+  {
+    calcuTimes=0;
+    uint64_t size=CacheSize-(ssdManager.sstMap.size()*blkSize);
+    options_->block_cache->SetCapacity(size);
+    fprintf(stderr,"blkcache size=%d\n",size);
+  }
   if(tempLog)
   {
     fprintf(tempLog,"prefetch hit:%d  prefetchAll:%d\nblkcache hit:%d  blkcacheAll:%d\n",hit_times,all_times,blkcache_hit_times,blkcache_all_times);
@@ -939,7 +933,6 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
       latency_hiccup_write(writeiops);
       latency_hiccup_size();
     }
-    // fprintf(stderr, "paused=%d\n", paused);
     if (lastIOPS.size() < 10) {
       lastIOPS.push_back(readiops);
     } else {
@@ -949,26 +942,20 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
       for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
         allIOPS += *i;
       }
-      // fprintf(stderr, "allIOPS=%d size=%d\n", allIOPS, lastIOPS.size());
       bool t = pauseComapaction.load();
       if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.9 && !t) {
-        // fprintf(stderr, "pauseComapaction from false to true\n");
         if (!paused) {
-          // fprintf(stderr, "stop compaction 0\n\n\n");
           Status status = impl_->PauseBackgroundWork();
           if (status == Status::OK()) {
             pauseComapaction.store(true);
             paused = true;
           }
-          // fprintf(stderr, "stop compaction\n\n\n");
         }
       } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.9 && t) {
-        // fprintf(stderr, "pauseComapaction from true to false\n");
         if (paused) {
           impl_->ContinueBackgroundWork();
           paused = false;
           pauseComapaction.store(false);
-          // fprintf(stderr, "continue compaction\n\n\n");
         }
       }
     }

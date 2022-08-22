@@ -1573,6 +1573,7 @@ enum OperationType : unsigned char {
   kHash,
   kReadHiccup,   // xp op latency info during the last report interval
   kWriteHiccup,  // xp
+  kSeekHiccup,  // xp
   kOthers
 };
 
@@ -1589,6 +1590,7 @@ static std::unordered_map<OperationType, std::string, std::hash<unsigned char>>
                            {kHash, "hash"},
                            {kReadHiccup, "readHiccup"},    // xp
                            {kWriteHiccup, "writeHiccup"},  // xp
+                           {kSeekHiccup, "seekHiccup"},  // xp
                            {kOthers, "op"}};
 
 // a class that reports stats to CSV file
@@ -1698,6 +1700,8 @@ class wpStats {
   // wp
   uint64_t readdone_ = 0;
   uint64_t last_report_readdone_ = 0;
+  uint64_t seekdone_ = 0;
+  uint64_t last_report_seekdone_ = 0;
   uint64_t writedone_ = 0;
   uint64_t last_report_writedone_ = 0;
   FILE* fp_op_hiccup_report = nullptr;
@@ -1742,7 +1746,15 @@ class wpStats {
         hist_.insert({kReadHiccup, std::move(hist_tmp_read_hiccup)});
       }
       hist_[kReadHiccup]->Add(micros);
+    }else if (kSeek == op_type) {
+      seekdone_ += num_ops;
+      if (hist_.find(kSeekHiccup) == hist_.end()) {
+        auto hist_tmp_read_hiccup = std::make_shared<HistogramImpl>();
+        hist_.insert({kSeekHiccup, std::move(hist_tmp_read_hiccup)});
+      }
+      hist_[kSeekHiccup]->Add(micros);
     }
+
 
     uint64_t now=FLAGS_env->NowMicros();
     int64_t myusecs_since_last = now - mylast_report_finish_;
@@ -1789,8 +1801,29 @@ class wpStats {
           fflush(fp_op_hiccup_report);
           hist_[kReadHiccup]->Clear();
         }
+        //seek
+        if (hist_.find(kSeekHiccup) != hist_.end()) {
+          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
+                  (now - start_) / 1000000.0,
+                  (seekdone_ - last_report_seekdone_) );
+          fflush(fp_op_hiccup_report);
+          fprintf(fp_op_hiccup_report,
+                  "seek %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                  "%8.0f   %8.0f\n",
+                  hist_[kSeekHiccup]->min(), hist_[kSeekHiccup]->max(),
+                  hist_[kSeekHiccup]->Average(),
+                  hist_[kSeekHiccup]->Percentile(25.0),
+                  hist_[kSeekHiccup]->Percentile(50.0),
+                  hist_[kSeekHiccup]->Percentile(75.0),
+                  hist_[kSeekHiccup]->Percentile(90.0),
+                  hist_[kSeekHiccup]->Percentile(99.0),
+                  hist_[kSeekHiccup]->Percentile(99.9));
+          fflush(fp_op_hiccup_report);
+          hist_[kSeekHiccup]->Clear();
+        }
         last_report_readdone_ = readdone_;
         last_report_writedone_ = writedone_;
+        last_report_seekdone_ = seekdone_;
         mylast_report_finish_ = now;
     }
   }
@@ -5674,6 +5707,7 @@ class Benchmark {
 
       } else if (query_type == 2) {
         thread->stats.ResetLastOpTime();
+        uint64_t start = FLAGS_env->NowMicros();
         // Seek query
         if (db_with_cfh->db != nullptr) {
           Iterator* single_iter = nullptr;
@@ -5701,6 +5735,10 @@ class Benchmark {
           delete single_iter;
         }
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kSeek);
+        uint64_t micros=FLAGS_env->NowMicros()-start;
+        wpstat.FinishedOps(micros,1,kSeek);
+        thread->shared->read_rate_limiter->Request(1, Env::IO_HIGH,
+                                                   nullptr /*stats*/);
       }
     }
     char msg[256];

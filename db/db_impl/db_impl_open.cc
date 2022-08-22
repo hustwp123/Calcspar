@@ -1330,10 +1330,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   Monitor::Init();
 
   // Prefetcher::Init(impl,false);
+  
 
   Prefetcher::Init(impl,true);
   TokenLimiter::SetDefaultInstance(
-      std::unique_ptr<TokenLimiter>(new TokenLimiter(1000)));
+      std::unique_ptr<TokenLimiter>(new TokenLimiter(3000)));
 
 
   impl->mutex_.Lock();
