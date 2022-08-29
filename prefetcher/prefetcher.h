@@ -365,6 +365,11 @@ class Prefetcher {
 
   static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush);
 
+
+  static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,
+  uint64_t flush,int prefetch_iops,int compaction_iops,
+  int R2,int R1);
+
   static bool getCompactionPaused();
 };
 }  // namespace rocksdb

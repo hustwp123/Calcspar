@@ -17,6 +17,14 @@ class TokenLimiter {
  public:
   int subtimes=0;
   int addtimes=5;
+  int I_middle=0; //middle IOPS
+  int I_low=0;
+  uint64_t T_middle=0; //middle 时间片
+  uint64_t T_low=0;
+  uint64_t refill_us=0;
+  bool updated=false;
+  int R_1=850; //前一秒到middle时间片时所剩余令牌数
+  int R_2=-1000; //前2秒到middle时间片时所剩余令牌数
 
   enum IOType {
     kRead,

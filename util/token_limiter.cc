@@ -91,7 +91,7 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
+      wait_threshold_us_{900 * 1000, 700 * 1000, 0, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),
@@ -102,6 +102,11 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
       has_pending_waiter_(false),
       stop_(false) {
   assert(tokens_per_sec_ > 0);
+  I_middle=tokens_per_sec_*0.1;
+  I_low=tokens_per_sec_*0.05;
+  T_middle=700*1000;
+  T_low=900*1000;
+  refill_us=env_->NowMicros();
 }
 
 TokenLimiter::~TokenLimiter() {
@@ -131,10 +136,32 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type,
          io_type <= TokenLimiter::IOType::kWrite);
 
   MutexLock g(&request_mutex_);
+
   total_requests_[io_type][io_src]++;
 
   if (stop_ || io_src == Env::IOSource::IO_SRC_DEFAULT) {
     return;
+  }
+  uint64_t now_us = env_->NowMicros();
+  // fprintf(stderr,"T_middle %lu  past %lu\n",T_middle,now_us-refill_us);
+  if(!updated&&now_us-refill_us>=T_middle)
+  {
+    updated=true;
+    R_2=R_1;
+    R_1=tokens_per_sec_-available_tokens_;
+    if(R_2>=0&&R_1>=0)
+    {
+      
+      I_middle=std::max((double)0,I_middle+0.6*(R_2-R_1));
+      I_low=std::max((double)0,I_low+0.4*(R_2-R_1));
+      T_middle=1000000-I_middle*500*1.5;
+      T_low=1000000-I_low*500*1.5;
+      // fprintf(stderr,"R2: %d R1:%d T_middle: %lu T_low: %lu\n",R_2,R_1,T_middle,T_low);
+      wait_threshold_us_[Env::IO_SRC_COMPACTION]=T_middle;
+      wait_threshold_us_[Env::IO_SRC_PREFETCH]=T_low;
+      Prefetcher::RecordLimiterTime(T_low,T_middle,0,I_low,I_middle,R_2,R_1);
+
+    }
   }
 
   uint64_t arrive_us = env_->NowMicros();
@@ -196,6 +223,8 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type,
 bool TokenLimiter::RefillIfNeeded(uint64_t now_sec) {
   if (now_sec >= next_refill_sec_) {
     // available_tokens_ >= 0, so fill make it tokens_per_sec_
+    refill_us=env_->NowMicros();
+    updated=false;
     available_tokens_ = tokens_per_sec_;
     next_refill_sec_ = now_sec + 1;
     return true;

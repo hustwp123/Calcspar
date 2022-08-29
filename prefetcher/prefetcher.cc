@@ -101,6 +101,20 @@ void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
     fflush(i.logFp_limiter_time);
   }
 }
+
+void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,uint64_t flush,
+                                   int prefetch_iops,int compaction_iops,
+                                   int R2,int R1) {
+  static Prefetcher &i = _GetInst();
+  uint64_t t = now();
+  int time = (t - i.limiter_star_time) / 1000000000;
+  if (i.logRWlat) {
+    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu  %d  %d  R2:%d  R1:%d \n", time, prefetch,
+            compaction, flush,prefetch_iops,compaction_iops,R2,R1);
+    fflush(i.logFp_limiter_time);
+  }
+}
+
 void Prefetcher::blkcacheInsert() {
   static Prefetcher &i = _GetInst();
   i.blkcache_insert_times++;
@@ -525,7 +539,7 @@ void Prefetcher::_CaluateSstHeat() {
   if (calcuTimes >= 10) {
     calcuTimes = 0;
     uint64_t size = CacheSize - (ssdManager.sstMap.size() * blkSize);
-    options_->block_cache->SetCapacity(size);
+    // options_->block_cache->SetCapacity(size);
     fprintf(stderr, "blkcache size=%d\n", size);
   }
   if (tempLog) {
@@ -787,7 +801,7 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
             "#type mean   25th   50th   75th    90th    99th    99.9th ");
     fprintf(logFp_prefetch_times, "#time  prefetch_times");
     fprintf(logFp_limiter_time,
-            "#time prefetch  compaction  flush&l0compaction\n");
+            "#time prefetch  compaction  flush&l0compaction  prefetch_iops  compaction_iops\n");
     tiktok_start = now();
     prefetch_start = now();
     limiter_star_time = now();
