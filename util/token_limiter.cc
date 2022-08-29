@@ -91,7 +91,7 @@ TokenLimiter::TokenLimiter(int32_t token_per_sec)
     : tokens_per_sec_(token_per_sec),
       available_tokens_(token_per_sec),
       next_refill_sec_(env_->NowMicros() / std::micro::den + 1),
-      wait_threshold_us_{500 * 1000, 700 * 1000, 500 * 1000, 0},
+      wait_threshold_us_{900 * 1000, 700 * 1000, 500 * 1000, 0},
       total_requests_{{0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}},
 
       queues_{std::deque<Req*>(), std::deque<Req*>(), std::deque<Req*>(),
@@ -292,7 +292,7 @@ void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
     request_mutex_.Unlock();
     return;
   }
-  if(!add&&subtimes<5)
+  if(!add&&subtimes<20)
   {
     subtimes++;
     request_mutex_.Unlock();
@@ -315,7 +315,7 @@ void TokenLimiter::TunePriority_(Env::IOSource io_src, bool add) {
   int b=wait_threshold_us_[1];
   int c=wait_threshold_us_[2];
   request_mutex_.Unlock();
-  // Prefetcher::RecordLimiterTime(a,b,c);
+  Prefetcher::RecordLimiterTime(a,b,c);
 
 
 }

@@ -8,11 +8,10 @@
 
 namespace rocksdb {
 
-
-
 const int blkSize = 256 * 1024;
-const uint64_t CacheSize=500*1024*1024;
-const size_t MAXSSTNUM =  (CacheSize)/(blkSize);  // ssd中缓存的sst_blk的最大数目
+const uint64_t CacheSize = 500 * 1024 * 1024;
+const size_t MAXSSTNUM =
+    (CacheSize) / (blkSize);  // ssd中缓存的sst_blk的最大数目
 
 std::atomic<bool> pauseComapaction;
 
@@ -28,10 +27,10 @@ std::vector<DbPath> db_paths = {
 
 Prefetcher::~Prefetcher() {
   pauseComapaction = false;
-  fprintf(stderr, "prefetcher hit times: %lu    all times: %lu\n", all_prefetch_hit_times,
-          all_prefetch_all_times);
-  fprintf(stderr, "blkcache hit times: %lu    all times: %lu\n", all_blkcache_hit_times,all_blkcache_all_times
-          );
+  fprintf(stderr, "prefetcher hit times: %lu    all times: %lu\n",
+          all_prefetch_hit_times, all_prefetch_all_times);
+  fprintf(stderr, "blkcache hit times: %lu    all times: %lu\n",
+          all_blkcache_hit_times, all_blkcache_all_times);
   fprintf(stderr,
           "prefetcher insert times: %lu    blkcache insert times: %lu\n",
           prefetch_times, blkcache_insert_times);
@@ -52,13 +51,12 @@ Prefetcher::~Prefetcher() {
     free(hdr_last_1s_size);
   }
 
-  if(tempLog)
-  {
-    fprintf(tempLog,"/n/n/n cache hit times\n");
-    fprintf(tempLog, "prefetcher hit times: %lu    all times: %lu\n", all_prefetch_hit_times,
-          all_prefetch_all_times);
-  fprintf(tempLog, "blkcache hit times: %lu    all times: %lu\n", all_blkcache_hit_times,all_blkcache_all_times
-          );
+  if (tempLog) {
+    fprintf(tempLog, "/n/n/n cache hit times\n");
+    fprintf(tempLog, "prefetcher hit times: %lu    all times: %lu\n",
+            all_prefetch_hit_times, all_prefetch_all_times);
+    fprintf(tempLog, "blkcache hit times: %lu    all times: %lu\n",
+            all_blkcache_hit_times, all_blkcache_all_times);
     fclose(tempLog);
   }
 
@@ -132,9 +130,9 @@ std::string Prefetcher::CacheGet(std::string key) {
   static Prefetcher &i = _GetInst();
   return i.cache->get(key);
 }
-void Prefetcher::CachePut(std::string key,std::string value){
+void Prefetcher::CachePut(std::string key, std::string value) {
   static Prefetcher &i = _GetInst();
-  i.cache->put(key,value);
+  i.cache->put(key, value);
 }
 
 void Prefetcher::CaluateSstHeat() {
@@ -144,7 +142,7 @@ void Prefetcher::CaluateSstHeat() {
 
 void Prefetcher::_PrefetcherToMem() {
   lock_.Lock();
-  uint64_t start_time=now();
+  uint64_t start_time = now();
   // fprintf(stderr, "prefetcher begin\n");
   uint64_t fromKey = 0;
   uint64_t outKey = 0;
@@ -154,14 +152,12 @@ void Prefetcher::_PrefetcherToMem() {
     return;
   }
   fromKey = cloudManager.getMax();
-  if(cloudManager.sstMap[fromKey]->get_times<=1.01)
-  {
+  if (cloudManager.sstMap[fromKey]->get_times <= 1.01) {
     lock_.Unlock();
     return;
   }
   // fprintf(stderr,"get_times=%lf\n",cloudManager.sstMap[fromKey]->get_times);
 
-  
   // fprintf(stderr,"ssdManager num %d\n",ssdManager.sstMap.size());
   if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
   {
@@ -194,7 +190,7 @@ void Prefetcher::_PrefetcherToMem() {
   int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
   if (readfd == -1) {
     lock_.Lock();
-    fprintf(stderr, "open error fname:%s \n",old_fname.c_str());
+    fprintf(stderr, "open error fname:%s \n", old_fname.c_str());
     SstTemp *t = cloudManager.sstMap[fromKey];
     cloudManager.sstMap.erase(fromKey);
     delete t;
@@ -243,7 +239,8 @@ void Prefetcher::_PrefetcherToMem() {
     lock_mem.Unlock();
   }
   // fprintf(stderr, "prefetcher end\n");
-  // fprintf(stderr,"size=%d use_time=%d\n",ssdManager.sstMap.size(),now()-start_time);
+  // fprintf(stderr,"size=%d
+  // use_time=%d\n",ssdManager.sstMap.size(),now()-start_time);
 
   prefetch_times++;
   t_prefetch_times++;
@@ -480,30 +477,29 @@ void Prefetcher::_CaluateSstHeat() {
   sst_iotimes.clear();
   lock_sst_io.Unlock();
   lock_.Lock();
-  int notZeroCloud1=0;
-  int notZeroCloud2=0;
-  int notZeroSsd=0;
+  int notZeroCloud1 = 0;
+  int notZeroCloud2 = 0;
+  int notZeroSsd = 0;
   for (auto it = temp_sst_iotimes.begin(); it != temp_sst_iotimes.end(); it++) {
     if (cloudManager.sstMap.find(it->first) != cloudManager.sstMap.end()) {
       auto p = cloudManager.sstMap[it->first];
-      p->get_times =( (p->get_times) + it->second)/2 ;
-      if(p->get_times||it->second)
-      {
-        // fprintf(stderr,"cloud:get_times:%d last1s times:%d\n",p->get_times,it->second);
+      p->get_times = ((p->get_times) + it->second) / 2;
+      if (p->get_times || it->second) {
+        // fprintf(stderr,"cloud:get_times:%d last1s
+        // times:%d\n",p->get_times,it->second);
         notZeroCloud1++;
       }
     } else if (ssdManager.sstMap.find(it->first) != ssdManager.sstMap.end()) {
       auto p = ssdManager.sstMap[it->first];
-      p->get_times = ((p->get_times) + it->second)/2;
-      if(p->get_times||it->second)
-      {
-        // fprintf(stderr,"ssd:get_times:%d last1s times:%d\n",p->get_times,it->second);
+      p->get_times = ((p->get_times) + it->second) / 2;
+      if (p->get_times || it->second) {
+        // fprintf(stderr,"ssd:get_times:%d last1s
+        // times:%d\n",p->get_times,it->second);
         notZeroSsd++;
       }
     } else {
-      cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second/2);
-      if(it->second)
-      {
+      cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second / 2);
+      if (it->second) {
         // fprintf(stderr,"cloud:last1s times:%d\n",it->second);
         notZeroCloud2++;
       }
@@ -514,7 +510,7 @@ void Prefetcher::_CaluateSstHeat() {
     if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
       auto p = it->second;
       auto key = it->first;
-      p->get_times = (p->get_times)/2 ;
+      p->get_times = (p->get_times) / 2;
     }
   }
   for (auto it = ssdManager.sstMap.begin(); it != ssdManager.sstMap.end();
@@ -522,30 +518,32 @@ void Prefetcher::_CaluateSstHeat() {
     if (temp_sst_iotimes.find(it->first) == temp_sst_iotimes.end()) {
       auto p = it->second;
       auto key = it->first;
-      p->get_times = (p->get_times)/2 ;
+      p->get_times = (p->get_times) / 2;
     }
   }
   calcuTimes++;
-  if(calcuTimes>=10)
-  {
-    calcuTimes=0;
-    uint64_t size=CacheSize-(ssdManager.sstMap.size()*blkSize);
+  if (calcuTimes >= 10) {
+    calcuTimes = 0;
+    uint64_t size = CacheSize - (ssdManager.sstMap.size() * blkSize);
     options_->block_cache->SetCapacity(size);
-    fprintf(stderr,"blkcache size=%d\n",size);
+    fprintf(stderr, "blkcache size=%d\n", size);
   }
-  if(tempLog)
-  {
-    fprintf(tempLog,"prefetch hit:%d  prefetchAll:%d\nblkcache hit:%d  blkcacheAll:%d\n",hit_times,all_times,blkcache_hit_times,blkcache_all_times);
-    fprintf(tempLog,"KVcache hit:%d  KVcacheAll:%d\n",KVcache_hit_times,KVcache_all_times);
-    fprintf(tempLog,"notZeroCloud1:%d notZeroCloud2:%d notZeroSsd:%d\n",notZeroCloud1,notZeroCloud2,notZeroSsd);
+  if (tempLog) {
+    fprintf(
+        tempLog,
+        "prefetch hit:%d  prefetchAll:%d\nblkcache hit:%d  blkcacheAll:%d\n",
+        hit_times, all_times, blkcache_hit_times, blkcache_all_times);
+    fprintf(tempLog, "KVcache hit:%d  KVcacheAll:%d\n", KVcache_hit_times,
+            KVcache_all_times);
+    fprintf(tempLog, "notZeroCloud1:%d notZeroCloud2:%d notZeroSsd:%d\n",
+            notZeroCloud1, notZeroCloud2, notZeroSsd);
     fflush(tempLog);
-    hit_times=0;
-    all_times=0;
-    blkcache_hit_times=0;
-    blkcache_all_times=0;
-    KVcache_hit_times=0;
-    KVcache_all_times=0;
-
+    hit_times = 0;
+    all_times = 0;
+    blkcache_hit_times = 0;
+    blkcache_all_times = 0;
+    KVcache_hit_times = 0;
+    KVcache_all_times = 0;
   }
   // cloudManager.sortSst();
   // ssdManager.sortSst();
@@ -581,7 +579,7 @@ size_t Prefetcher::_Prefetcher2BlocksFromMem(uint64_t key, uint64_t offset,
   }
   int num2 = n - num1;
   if (num2) {
-    memcpy(scratch+num1, temp2, num2);
+    memcpy(scratch + num1, temp2, num2);
   }
 
   lock_mem.Unlock();
@@ -700,14 +698,15 @@ size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
 }
 size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
                                          size_t n, char *scratch) {
-                                          // fprintf(stderr,"size:%d\n",n);
+  // fprintf(stderr,"size:%d\n",n);
   all_times++;
   all_prefetch_all_times++;
   size_t errorFlag = n + 1;
   uint64_t key = sst_id * 100000 + offset / (blkSize);
   offset = offset % (blkSize);
   if (offset + n > blkSize) {
-    if (n<=blkSize&&ssdManager.sstMap.find(key) != ssdManager.sstMap.end() &&
+    if (n <= blkSize &&
+        ssdManager.sstMap.find(key) != ssdManager.sstMap.end() &&
         ssdManager.sstMap.find(key + 1) != ssdManager.sstMap.end()) {
       // fprintf(stderr, "need 2 blocks size==%d\n",n);
       size_t re = errorFlag;
@@ -746,12 +745,10 @@ void Prefetcher::Init(DBImpl *impl, bool doPrefetch_) {
   i._Init(impl, doPrefetch_);
 }
 
-void Prefetcher::SetOptions(BlockBasedTableOptions* options)
-{
+void Prefetcher::SetOptions(BlockBasedTableOptions *options) {
   static Prefetcher &i = _GetInst();
-  if(!i.options_)
-  {
-    i.options_=options;
+  if (!i.options_) {
+    i.options_ = options;
   }
 }
 
@@ -760,13 +757,12 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
   if (inited) {
     return;
   }
-  cache=new LRUCache(350*1024);
+  cache = new LRUCache(350 * 1024);
   inited = true;
   impl_ = impl;
 
-  if(tempLog==nullptr)
-  {
-    tempLog=fopen("./hit_ratio.log","a+");
+  if (tempLog == nullptr) {
+    tempLog = fopen("./hit_ratio.log", "a+");
   }
 
   if (logRWlat) {
@@ -797,7 +793,7 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
     limiter_star_time = now();
   }
   std::thread t(caluateSstHeatThread);
-    t.detach();
+  t.detach();
   if (doPrefetch_) {
     int ret;
     ret = posix_memalign((void **)&buf_, 512, blkSize);
@@ -805,8 +801,6 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
       fprintf(stderr, "posix_memalign failed");
       exit(1);
     }
-
-    
 
     std::thread t2(prefetchThread);
     t2.detach();
@@ -933,29 +927,32 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
       latency_hiccup_write(writeiops);
       latency_hiccup_size();
     }
-    if (lastIOPS.size() < 10) {
-      lastIOPS.push_back(readiops);
-    } else {
-      lastIOPS.pop_front();
-      lastIOPS.push_back(readiops);
-      int allIOPS = 0;
-      for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
-        allIOPS += *i;
-      }
-      bool t = pauseComapaction.load();
-      if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.9 && !t) {
-        if (!paused) {
-          Status status = impl_->PauseBackgroundWork();
-          if (status == Status::OK()) {
-            pauseComapaction.store(true);
-            paused = true;
-          }
+    bool doPause = false;
+    if (doPause) {
+      if (lastIOPS.size() < 10) {
+        lastIOPS.push_back(readiops);
+      } else {
+        lastIOPS.pop_front();
+        lastIOPS.push_back(readiops);
+        int allIOPS = 0;
+        for (auto i = lastIOPS.begin(); i != lastIOPS.end(); i++) {
+          allIOPS += *i;
         }
-      } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.9 && t) {
-        if (paused) {
-          impl_->ContinueBackgroundWork();
-          paused = false;
-          pauseComapaction.store(false);
+        bool t = pauseComapaction.load();
+        if (allIOPS / lastIOPS.size() >= IOPS_MAX * 0.9 && !t) {
+          if (!paused) {
+            Status status = impl_->PauseBackgroundWork();
+            if (status == Status::OK()) {
+              pauseComapaction.store(true);
+              paused = true;
+            }
+          }
+        } else if (allIOPS / lastIOPS.size() < IOPS_MAX * 0.9 && t) {
+          if (paused) {
+            impl_->ContinueBackgroundWork();
+            paused = false;
+            pauseComapaction.store(false);
+          }
         }
       }
     }

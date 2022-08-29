@@ -1573,7 +1573,7 @@ enum OperationType : unsigned char {
   kHash,
   kReadHiccup,   // xp op latency info during the last report interval
   kWriteHiccup,  // xp
-  kSeekHiccup,  // xp
+  kSeekHiccup,   // xp
   kOthers
 };
 
@@ -1590,7 +1590,7 @@ static std::unordered_map<OperationType, std::string, std::hash<unsigned char>>
                            {kHash, "hash"},
                            {kReadHiccup, "readHiccup"},    // xp
                            {kWriteHiccup, "writeHiccup"},  // xp
-                           {kSeekHiccup, "seekHiccup"},  // xp
+                           {kSeekHiccup, "seekHiccup"},    // xp
                            {kOthers, "op"}};
 
 // a class that reports stats to CSV file
@@ -1706,11 +1706,11 @@ class wpStats {
   uint64_t last_report_writedone_ = 0;
   FILE* fp_op_hiccup_report = nullptr;
   uint64_t start_ = 0;
-  uint64_t mylast_report_finish_=0;
+  uint64_t mylast_report_finish_ = 0;
   std::unordered_map<OperationType, std::shared_ptr<HistogramImpl>,
                      std::hash<unsigned char>>
       hist_;
-  uint64_t last_op_finish_=0;
+  uint64_t last_op_finish_ = 0;
 
   std::mutex mu_;
 
@@ -1730,7 +1730,8 @@ class wpStats {
       fclose(fp_op_hiccup_report);
     }
   }
-  void FinishedOps(uint64_t micros,int64_t num_ops, enum OperationType op_type = kOthers) {
+  void FinishedOps(uint64_t micros, int64_t num_ops,
+                   enum OperationType op_type = kOthers) {
     std::lock_guard<std::mutex> lock(mu_);
     if (kWrite == op_type) {  // xp
       writedone_ += num_ops;
@@ -1746,7 +1747,7 @@ class wpStats {
         hist_.insert({kReadHiccup, std::move(hist_tmp_read_hiccup)});
       }
       hist_[kReadHiccup]->Add(micros);
-    }else if (kSeek == op_type) {
+    } else if (kSeek == op_type) {
       seekdone_ += num_ops;
       if (hist_.find(kSeekHiccup) == hist_.end()) {
         auto hist_tmp_read_hiccup = std::make_shared<HistogramImpl>();
@@ -1755,76 +1756,71 @@ class wpStats {
       hist_[kSeekHiccup]->Add(micros);
     }
 
-
-    uint64_t now=FLAGS_env->NowMicros();
+    uint64_t now = FLAGS_env->NowMicros();
     int64_t myusecs_since_last = now - mylast_report_finish_;
-    if(myusecs_since_last>1000000)
-    {
+    if (myusecs_since_last > 1000000) {
       // write
-        if (hist_.find(kWriteHiccup) != hist_.end()) {
-          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
-                  (now - start_) / 1000000.0,
-                  (writedone_ - last_report_writedone_));
-          fflush(fp_op_hiccup_report);
-          fprintf(fp_op_hiccup_report,
-                  "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
-                  "%8.0f   %8.0f\n",
-                  hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
-                  hist_[kWriteHiccup]->Average(),
-                  hist_[kWriteHiccup]->Percentile(25.0),
-                  hist_[kWriteHiccup]->Percentile(50.0),
-                  hist_[kWriteHiccup]->Percentile(75.0),
-                  hist_[kWriteHiccup]->Percentile(90.0),
-                  hist_[kWriteHiccup]->Percentile(99.0),
-                  hist_[kWriteHiccup]->Percentile(99.9));
-          fflush(fp_op_hiccup_report);
-          hist_[kWriteHiccup]->Clear();
-        }
+      if (hist_.find(kWriteHiccup) != hist_.end()) {
+        fprintf(fp_op_hiccup_report, "%8.0f  %8d  ", (now - start_) / 1000000.0,
+                (writedone_ - last_report_writedone_));
+        fflush(fp_op_hiccup_report);
+        fprintf(fp_op_hiccup_report,
+                "write %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                "%8.0f   %8.0f\n",
+                hist_[kWriteHiccup]->min(), hist_[kWriteHiccup]->max(),
+                hist_[kWriteHiccup]->Average(),
+                hist_[kWriteHiccup]->Percentile(25.0),
+                hist_[kWriteHiccup]->Percentile(50.0),
+                hist_[kWriteHiccup]->Percentile(75.0),
+                hist_[kWriteHiccup]->Percentile(90.0),
+                hist_[kWriteHiccup]->Percentile(99.0),
+                hist_[kWriteHiccup]->Percentile(99.9));
+        fflush(fp_op_hiccup_report);
+        hist_[kWriteHiccup]->Clear();
+      }
 
-        // read
-        if (hist_.find(kReadHiccup) != hist_.end()) {
-          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
-                  (now - start_) / 1000000.0,
-                  (readdone_ - last_report_readdone_) );
-          fflush(fp_op_hiccup_report);
-          fprintf(fp_op_hiccup_report,
-                  "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
-                  "%8.0f   %8.0f\n",
-                  hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
-                  hist_[kReadHiccup]->Average(),
-                  hist_[kReadHiccup]->Percentile(25.0),
-                  hist_[kReadHiccup]->Percentile(50.0),
-                  hist_[kReadHiccup]->Percentile(75.0),
-                  hist_[kReadHiccup]->Percentile(90.0),
-                  hist_[kReadHiccup]->Percentile(99.0),
-                  hist_[kReadHiccup]->Percentile(99.9));
-          fflush(fp_op_hiccup_report);
-          hist_[kReadHiccup]->Clear();
-        }
-        //seek
-        if (hist_.find(kSeekHiccup) != hist_.end()) {
-          fprintf(fp_op_hiccup_report, "%8.0f  %8d  ",
-                  (now - start_) / 1000000.0,
-                  (seekdone_ - last_report_seekdone_) );
-          fflush(fp_op_hiccup_report);
-          fprintf(fp_op_hiccup_report,
-                  "seek %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
-                  "%8.0f   %8.0f\n",
-                  hist_[kSeekHiccup]->min(), hist_[kSeekHiccup]->max(),
-                  hist_[kSeekHiccup]->Average(),
-                  hist_[kSeekHiccup]->Percentile(25.0),
-                  hist_[kSeekHiccup]->Percentile(50.0),
-                  hist_[kSeekHiccup]->Percentile(75.0),
-                  hist_[kSeekHiccup]->Percentile(90.0),
-                  hist_[kSeekHiccup]->Percentile(99.0),
-                  hist_[kSeekHiccup]->Percentile(99.9));
-          fflush(fp_op_hiccup_report);
-          hist_[kSeekHiccup]->Clear();
-        }
-        last_report_readdone_ = readdone_;
-        last_report_writedone_ = writedone_;
-        last_report_seekdone_ = seekdone_;
-        mylast_report_finish_ = now;
+      // read
+      if (hist_.find(kReadHiccup) != hist_.end()) {
+        fprintf(fp_op_hiccup_report, "%8.0f  %8d  ", (now - start_) / 1000000.0,
+                (readdone_ - last_report_readdone_));
+        fflush(fp_op_hiccup_report);
+        fprintf(fp_op_hiccup_report,
+                "read %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                "%8.0f   %8.0f\n",
+                hist_[kReadHiccup]->min(), hist_[kReadHiccup]->max(),
+                hist_[kReadHiccup]->Average(),
+                hist_[kReadHiccup]->Percentile(25.0),
+                hist_[kReadHiccup]->Percentile(50.0),
+                hist_[kReadHiccup]->Percentile(75.0),
+                hist_[kReadHiccup]->Percentile(90.0),
+                hist_[kReadHiccup]->Percentile(99.0),
+                hist_[kReadHiccup]->Percentile(99.9));
+        fflush(fp_op_hiccup_report);
+        hist_[kReadHiccup]->Clear();
+      }
+      // seek
+      if (hist_.find(kSeekHiccup) != hist_.end()) {
+        fprintf(fp_op_hiccup_report, "%8.0f  %8d  ", (now - start_) / 1000000.0,
+                (seekdone_ - last_report_seekdone_));
+        fflush(fp_op_hiccup_report);
+        fprintf(fp_op_hiccup_report,
+                "seek %8ld   %8ld   %8.0f   %8.0f   %8.0f   %8.0f   %8.0f   "
+                "%8.0f   %8.0f\n",
+                hist_[kSeekHiccup]->min(), hist_[kSeekHiccup]->max(),
+                hist_[kSeekHiccup]->Average(),
+                hist_[kSeekHiccup]->Percentile(25.0),
+                hist_[kSeekHiccup]->Percentile(50.0),
+                hist_[kSeekHiccup]->Percentile(75.0),
+                hist_[kSeekHiccup]->Percentile(90.0),
+                hist_[kSeekHiccup]->Percentile(99.0),
+                hist_[kSeekHiccup]->Percentile(99.9));
+        fflush(fp_op_hiccup_report);
+        hist_[kSeekHiccup]->Clear();
+      }
+      last_report_readdone_ = readdone_;
+      last_report_writedone_ = writedone_;
+      last_report_seekdone_ = seekdone_;
+      mylast_report_finish_ = now;
     }
   }
 };
@@ -5663,8 +5659,8 @@ class Benchmark {
           fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
           abort();
         }
-        uint64_t micros=FLAGS_env->NowMicros()-start;
-        wpstat.FinishedOps(micros,1,kRead);
+        uint64_t micros = FLAGS_env->NowMicros() - start;
+        wpstat.FinishedOps(micros, 1, kRead);
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
         thread->shared->read_rate_limiter->Request(1, Env::IO_HIGH,
                                                    nullptr /*stats*/);
@@ -5694,8 +5690,8 @@ class Benchmark {
           fprintf(stderr, "put error: %s\n", s.ToString().c_str());
           exit(1);
         }
-        uint64_t micros=FLAGS_env->NowMicros()-start;
-        wpstat.FinishedOps(micros,1,kWrite);
+        uint64_t micros = FLAGS_env->NowMicros() - start;
+        wpstat.FinishedOps(micros, 1, kWrite);
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kWrite);
         thread->shared->write_rate_limiter->Request(1, Env::IO_HIGH,
                                                     nullptr /*stats*/);
@@ -5735,8 +5731,8 @@ class Benchmark {
           delete single_iter;
         }
         thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kSeek);
-        uint64_t micros=FLAGS_env->NowMicros()-start;
-        wpstat.FinishedOps(micros,1,kSeek);
+        uint64_t micros = FLAGS_env->NowMicros() - start;
+        wpstat.FinishedOps(micros, 1, kSeek);
         thread->shared->read_rate_limiter->Request(1, Env::IO_HIGH,
                                                    nullptr /*stats*/);
       }
@@ -6898,10 +6894,15 @@ class Benchmark {
             nullptr /* stats */, RateLimiter::OpType::kWrite);
       }
       tiktoks = FLAGS_env->NowMicros() - tiktok_start;
-      if (tiktoks > 1000 * 1000000) {
-        write_rate_limiter->SetBytesPerSecond(5 * ((9000 * (16 + 256))));
-      } else if (tiktoks > 2500 * 1000000) {
-        write_rate_limiter->SetBytesPerSecond(((18000 * (16 + 256))));
+      if (tiktoks > (uint64_t)2400 * (uint64_t)1000000&&tiktoks < (uint64_t)2410 * (uint64_t)1000000) {
+        write_rate_limiter->SetBytesPerSecond(1 * ((4000 * (16 + 256))));
+        fprintf(stderr,"tiktoks=%d 1\n",tiktoks);
+      } else if (tiktoks > 1800 * 1000000&&tiktoks < 1810 * 1000000) {
+        write_rate_limiter->SetBytesPerSecond(3 * ((4000 * (16 + 256))));
+        fprintf(stderr,"tiktoks=%d 2\n",tiktoks);
+      } else if (tiktoks > 600 * 1000000&&tiktoks < 610 * 1000000) {
+        write_rate_limiter->SetBytesPerSecond(4 * ((4000 * (16 + 256))));
+        fprintf(stderr,"tiktoks=%d 3\n",tiktoks);
       }
       // // fprintf(stderr,"tiktoks=%ld\n",tiktoks);
       // if(tiktoks>120*1000000)

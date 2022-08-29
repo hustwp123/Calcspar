@@ -264,7 +264,7 @@ class Prefetcher {
   char* buf_ = nullptr;
   bool inited = false;
 
-  bool logRWlat=false;
+  bool logRWlat=true;
 
   static void Init(DBImpl *impl,bool doPrefetch_);
   void _Init(DBImpl *impl,bool doPrefetch_);
