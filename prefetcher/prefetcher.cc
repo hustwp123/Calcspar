@@ -539,7 +539,7 @@ void Prefetcher::_CaluateSstHeat() {
   if (calcuTimes >= 10) {
     calcuTimes = 0;
     uint64_t size = CacheSize - (ssdManager.sstMap.size() * blkSize);
-    // options_->block_cache->SetCapacity(size);
+    options_->block_cache->SetCapacity(size);
     fprintf(stderr, "blkcache size=%d\n", size);
   }
   if (tempLog) {
