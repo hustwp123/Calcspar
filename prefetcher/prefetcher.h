@@ -39,101 +39,6 @@
 
 namespace rocksdb {
 
-struct DLinkedNode {
-    std::string key, value;
-    DLinkedNode* prev;
-    DLinkedNode* next;
-    DLinkedNode(): key(""), value(""), prev(nullptr), next(nullptr) {}
-    DLinkedNode(std::string _key, std::string _value): key(_key), value(_value), prev(nullptr), next(nullptr) {}
-};
-
-class LRUCache {
-private:
-    std::unordered_map<std::string, DLinkedNode*> cache;
-    DLinkedNode* head;
-    DLinkedNode* tail;
-    int size;
-    int capacity;
-
-public:
-    LRUCache(): capacity(200*1024), size(0) {
-        // 使用伪头部和伪尾部节点
-        head = new DLinkedNode();
-        tail = new DLinkedNode();
-        head->next = tail;
-        tail->prev = head;
-    }
-    LRUCache(int _capacity): capacity(_capacity), size(0) {
-        // 使用伪头部和伪尾部节点
-        head = new DLinkedNode();
-        tail = new DLinkedNode();
-        head->next = tail;
-        tail->prev = head;
-    }
-    
-    std::string get(std::string key) {
-        if (!cache.count(key)) {
-            return "notfound42316589/72";
-        }
-        // 如果 key 存在，先通过哈希表定位，再移到头部
-        DLinkedNode* node = cache[key];
-        moveToHead(node);
-        // fprintf(stderr,"hit in cache\n");
-        return node->value;
-    }
-    
-    void put(std::string key, std::string value) {
-        // fprintf(stderr,"cache size %d cap %d\n",size,capacity);
-        if (!cache.count(key)) {
-            // 如果 key 不存在，创建一个新的节点
-            DLinkedNode* node = new DLinkedNode(key, value);
-            // 添加进哈希表
-            cache[key] = node;
-            // 添加至双向链表的头部
-            addToHead(node);
-            ++size;
-            if (size > capacity) {
-                // 如果超出容量，删除双向链表的尾部节点
-                DLinkedNode* removed = removeTail();
-                // 删除哈希表中对应的项
-                cache.erase(removed->key);
-                // 防止内存泄漏
-                delete removed;
-                --size;
-            }
-        }
-        else {
-            // 如果 key 存在，先通过哈希表定位，再修改 value，并移到头部
-            DLinkedNode* node = cache[key];
-            node->value = value;
-            moveToHead(node);
-        }
-    }
-
-    void addToHead(DLinkedNode* node) {
-        node->prev = head;
-        node->next = head->next;
-        head->next->prev = node;
-        head->next = node;
-    }
-    
-    void removeNode(DLinkedNode* node) {
-        node->prev->next = node->next;
-        node->next->prev = node->prev;
-    }
-
-    void moveToHead(DLinkedNode* node) {
-        removeNode(node);
-        addToHead(node);
-    }
-
-    DLinkedNode* removeTail() {
-        DLinkedNode* node = tail->prev;
-        removeNode(node);
-        return node;
-    }
-};
-
 class SstTemp {
  public:
   uint64_t sst_id_blk;
@@ -237,7 +142,7 @@ class Prefetcher {
  public:
   int calcuTimes=0;
   BlockBasedTableOptions* options_=nullptr;
-  LRUCache * cache=nullptr;
+
   DBImpl *impl_;
   bool paused=false;
   std::list<int> lastIOPS;//过去10秒内的IOPS
@@ -255,8 +160,6 @@ class Prefetcher {
 
   uint64_t blkcache_all_times=0;
   uint64_t blkcache_hit_times=0;
-  uint64_t KVcache_all_times=0;
-  uint64_t KVcache_hit_times=0;
   std::unordered_map<uint64_t, char*> sst_blocks;
   std::vector<char*> mems;
 
@@ -264,7 +167,7 @@ class Prefetcher {
   char* buf_ = nullptr;
   bool inited = false;
 
-  bool logRWlat=true;
+  bool logRWlat=false;
 
   static void Init(DBImpl *impl,bool doPrefetch_);
   void _Init(DBImpl *impl,bool doPrefetch_);
@@ -331,37 +234,25 @@ class Prefetcher {
   static void CaluateSstHeat();
   void _CaluateSstHeat();
   static void Prefetche();
-  void _Prefetcher();
 
   void _PrefetcherToMem();
-  void _PrefetcherToMem2();
 
   static size_t TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset, size_t n,
                                      char* scratch);
   size_t _TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset, size_t n,
                                char* scratch);
 
-  size_t _PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
-                            char* scratch);
-  size_t _PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
-                             char* scratch);
-
 
   size_t _PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
                             char* scratch);
 
-    size_t _Prefetcher2BlocksFromMem(uint64_t key, uint64_t offset, size_t n,
+  size_t _Prefetcher2BlocksFromMem(uint64_t key, uint64_t offset, size_t n,
                             char* scratch);
 
   static void blkcacheInsert();
   static void blkcacheTryGet();
   static void blkcacheGet();
 
-  static void KVcacheTryGet();
-  static void KVcacheGet();
-
-  static std::string CacheGet(std::string key);
-  static void CachePut(std::string key,std::string value);
 
   static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush);
 

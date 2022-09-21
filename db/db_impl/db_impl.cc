@@ -1525,8 +1525,6 @@ Status DBImpl::GetImpl(const ReadOptions& ro, ColumnFamilyHandle* column_family,
   // s is both in/out. When in, s could either be OK or MergeInProgress.
   // merge_operands will contain the sequence of merges in the latter case.
   LookupKey lkey(key, snapshot, read_options.timestamp);
-  bool useKVCache=false;
-  // bool useKVCache = true;
 
   Slice cache_key_slice = lkey.internal_key();
   std::string cache_key;
@@ -1559,40 +1557,11 @@ Status DBImpl::GetImpl(const ReadOptions& ro, ColumnFamilyHandle* column_family,
   }
 
   if (!done) {
-    if (useKVCache) {
-      // fprintf(stderr,"key:%s\n",cache_key.c_str());
-      Prefetcher::KVcacheTryGet();
-      std::string t = Prefetcher::CacheGet(cache_key);
-      if (t != "notfound42316589/72") {
-        Prefetcher::KVcacheGet();
-        if(t.size()<1000)
-        {
-          fprintf(stderr,"hit size %d \n",t.size());
-        }
-        auto re = pinnable_val->GetSelf();
-        *re = t;
-        pinnable_val->PinSelf();
-        return s;
-      }
-    }
     PERF_TIMER_GUARD(get_from_output_files_time);
     sv->current->Get(read_options, lkey, pinnable_val, &s, &merge_context,
                      &max_covering_tombstone_seq, value_found, nullptr, nullptr,
                      callback, is_blob_index);
     RecordTick(stats_, MEMTABLE_MISS);
-
-    if (useKVCache && s.ok()) {
-      std::string cache_value;
-      cache_value.assign(pinnable_val->data(), pinnable_val->size());
-      if(cache_value.size()>1100)
-      {
-        fprintf(stderr,"error size=%d\n",cache_value.size());
-      }
-
-      // fprintf(stderr,"cache_key size %d key size %d cache_value size %d size
-      // %d\n",cache_key.size(),cache_key_slice.size(),cache_value.size(),pinnable_val->size());
-      Prefetcher::CachePut(cache_key, cache_value);
-    }
   }
 
   {

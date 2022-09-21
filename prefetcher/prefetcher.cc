@@ -20,10 +20,6 @@ std::vector<DbPath> db_paths = {
     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
 };
 
-// std::vector<DbPath> db_paths = {
-//     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
-//     {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
-// };
 
 Prefetcher::~Prefetcher() {
   pauseComapaction = false;
@@ -79,7 +75,6 @@ void caluateSstHeatThread()  //统计sst热度线程
 void prefetchThread()  //统计sst热度线程
 {
   while (1) {
-    // sleep(1);
     Prefetcher::Prefetche();
   }
 }
@@ -87,7 +82,6 @@ void prefetchThread()  //统计sst热度线程
 void Prefetcher::Prefetche() {
   static Prefetcher &i = _GetInst();
 
-  // i._Prefetcher();
   i._PrefetcherToMem();
 }
 void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
@@ -102,15 +96,16 @@ void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
   }
 }
 
-void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,uint64_t flush,
-                                   int prefetch_iops,int compaction_iops,
-                                   int R2,int R1) {
+void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
+                                   uint64_t flush, int prefetch_iops,
+                                   int compaction_iops, int R2, int R1) {
   static Prefetcher &i = _GetInst();
   uint64_t t = now();
   int time = (t - i.limiter_star_time) / 1000000000;
   if (i.logRWlat) {
-    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu  %d  %d  R2:%d  R1:%d \n", time, prefetch,
-            compaction, flush,prefetch_iops,compaction_iops,R2,R1);
+    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu  %d  %d  R2:%d  R1:%d \n",
+            time, prefetch, compaction, flush, prefetch_iops, compaction_iops,
+            R2, R1);
     fflush(i.logFp_limiter_time);
   }
 }
@@ -131,24 +126,6 @@ void Prefetcher::blkcacheGet() {
   i.all_blkcache_hit_times++;
 }
 
-void Prefetcher::KVcacheTryGet() {
-  static Prefetcher &i = _GetInst();
-  i.KVcache_all_times++;
-}
-void Prefetcher::KVcacheGet() {
-  static Prefetcher &i = _GetInst();
-  i.KVcache_hit_times++;
-}
-
-std::string Prefetcher::CacheGet(std::string key) {
-  static Prefetcher &i = _GetInst();
-  return i.cache->get(key);
-}
-void Prefetcher::CachePut(std::string key, std::string value) {
-  static Prefetcher &i = _GetInst();
-  i.cache->put(key, value);
-}
-
 void Prefetcher::CaluateSstHeat() {
   static Prefetcher &i = _GetInst();
   i._CaluateSstHeat();
@@ -157,7 +134,6 @@ void Prefetcher::CaluateSstHeat() {
 void Prefetcher::_PrefetcherToMem() {
   lock_.Lock();
   uint64_t start_time = now();
-  // fprintf(stderr, "prefetcher begin\n");
   uint64_t fromKey = 0;
   uint64_t outKey = 0;
   if (cloudManager.sstMap.empty())  // cloud中无sst
@@ -166,13 +142,24 @@ void Prefetcher::_PrefetcherToMem() {
     return;
   }
   fromKey = cloudManager.getMax();
+  uint64_t coldKey = ssdManager.getMin();
+  if (ssdManager.sstMap[coldKey]->get_times <= 0.6) {
+    SstTemp* t = ssdManager.sstMap[coldKey];
+    ssdManager.sstMap.erase(coldKey);
+    cloudManager.sstMap[coldKey] = t;
+
+    char* temp = sst_blocks[coldKey];
+    lock_mem.Lock();
+    if (temp != nullptr) {
+      sst_blocks.erase(coldKey);
+      mems.push_back(temp);
+    }
+    lock_mem.Unlock();
+  }
   if (cloudManager.sstMap[fromKey]->get_times <= 1.01) {
     lock_.Unlock();
     return;
   }
-  // fprintf(stderr,"get_times=%lf\n",cloudManager.sstMap[fromKey]->get_times);
-
-  // fprintf(stderr,"ssdManager num %d\n",ssdManager.sstMap.size());
   if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
   {
     lock_.Unlock();
@@ -191,8 +178,6 @@ void Prefetcher::_PrefetcherToMem() {
   uint64_t fromSstId = fromKey / 100000;
   uint64_t blk_num = fromKey % 100000;
   if (fromSstId == 0) {
-    // fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
-    //         cloudManager.sstMap[fromKey]->get_times);
     lock_.Lock();
     SstTemp *t = cloudManager.sstMap[fromKey];
     cloudManager.sstMap.erase(fromKey);
@@ -252,9 +237,6 @@ void Prefetcher::_PrefetcherToMem() {
     }
     lock_mem.Unlock();
   }
-  // fprintf(stderr, "prefetcher end\n");
-  // fprintf(stderr,"size=%d
-  // use_time=%d\n",ssdManager.sstMap.size(),now()-start_time);
 
   prefetch_times++;
   t_prefetch_times++;
@@ -268,223 +250,6 @@ void Prefetcher::_PrefetcherToMem() {
   lock_.Unlock();
 }
 
-void Prefetcher::_PrefetcherToMem2() {
-  lock_.Lock();
-  uint64_t fromKey = 0;
-  uint64_t outKey = 0;
-  if (cloudManager.sstMap.empty())  // cloud中无sst
-  {
-    lock_.Unlock();
-    return;
-  }
-  PAIR from = cloudManager.getMaxSorted();
-  if (from.second == nullptr) {
-    lock_.Unlock();
-    return;
-  }
-  fromKey = from.first;
-  if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
-  {
-    cloudManager.subMaxIndex();
-    lock_.Unlock();
-  } else  // ssd中已放满
-          // 需比较ssd中最冷的sst_blk的热度和cloud中最热的sst_blk的热度 进行替换
-  {
-    PAIR out = ssdManager.getMinSorted();
-    if (out.second == nullptr) {
-      lock_.Unlock();
-      return;
-    }
-    outKey = out.first;
-    if (from.second->get_times < out.second->get_times) {
-      cloudManager.subMaxIndex();
-      ssdManager.addMinIndex();
-      lock_.Unlock();
-    } else {
-      lock_.Unlock();
-      return;
-    }
-    // if ((ssdManager.sstMap[outKey]->get_times) <
-    //     (cloudManager.sstMap[fromKey]->get_times)) {
-    //   lock_.Unlock();
-    // } else {
-    //   lock_.Unlock();
-    //   return;
-    // }
-  }
-  uint64_t fromSstId = fromKey / 100000;
-  uint64_t blk_num = fromKey % 100000;
-  if (fromSstId == 0) {
-    // fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
-    //         cloudManager.sstMap[fromKey]->get_times);
-    lock_.Lock();
-    SstTemp *t = cloudManager.sstMap[fromSstId];
-    cloudManager.sstMap.erase(fromSstId);
-    delete t;
-    lock_.Unlock();
-    return;
-  }
-  std::string old_fname = TableFileName(db_paths, fromSstId, 0);
-  int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
-  if (readfd == -1) {
-    lock_.Lock();
-
-    SstTemp *t = cloudManager.sstMap[fromSstId];
-    cloudManager.sstMap.erase(fromSstId);
-    delete t;
-    lock_.Unlock();
-    return;
-  }
-  uint64_t offset = blk_num * blkSize;
-  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
-                                    TokenLimiter::kRead);
-  int ret = pread(readfd, buf_, blkSize, offset);
-  Monitor::CollectIO(6, 1);
-  if (ret == -1) {
-    fprintf(stderr, "pread error\n");
-    close(readfd);
-    return;
-  }
-  close(readfd);
-  lock_.Lock();  //更新cloudManager ssdManager
-  SstTemp *t = cloudManager.sstMap[fromKey];
-  char *temp = nullptr;
-  if (!mems.empty()) {
-    temp = mems[mems.size() - 1];
-    mems.pop_back();
-  } else {
-    temp = new char[blkSize];
-  }
-  memcpy(temp, buf_, ret);
-
-  lock_mem.Lock();
-  sst_blocks[fromKey] = temp;
-  lock_mem.Unlock();
-
-  cloudManager.sstMap.erase(fromKey);
-  ssdManager.sstMap[fromKey] = t;
-  if (outKey != 0) {
-    t = ssdManager.sstMap[outKey];
-    ssdManager.sstMap.erase(outKey);
-    cloudManager.sstMap[outKey] = t;
-
-    temp = sst_blocks[outKey];
-    lock_mem.Lock();
-    if (temp != nullptr) {
-      sst_blocks.erase(outKey);
-      mems.push_back(temp);
-    }
-    lock_mem.Unlock();
-  }
-  // fprintf(stderr, "prefetcher end\n");
-  prefetch_times++;
-  t_prefetch_times++;
-  uint64_t t_tiktoks = now() - prefetch_start;
-  if (t_tiktoks >= 1000000000 && logRWlat) {
-    log_prefetch_times(t_tiktoks / 1000000000, t_prefetch_times);
-    prefetch_start = now();
-    t_prefetch_times = 0;
-  }
-
-  lock_.Unlock();
-}
-void Prefetcher::_Prefetcher() {
-  lock_.Lock();
-  // fprintf(stderr, "prefetcher begin\n");
-  uint64_t fromKey = 0;
-  uint64_t outKey = 0;
-  if (cloudManager.sstMap.empty())  // cloud中无sst
-  {
-    lock_.Unlock();
-    return;
-  }
-  fromKey = cloudManager.getMax();
-  if (ssdManager.sstMap.size() < MAXSSTNUM)  // ssd中未放满
-  {
-    lock_.Unlock();
-  } else  // ssd中已放满
-          // 需比较ssd中最冷的sst_blk的热度和cloud中最热的sst_blk的热度 进行替换
-  {
-    outKey = ssdManager.getMin();
-    if ((ssdManager.sstMap[outKey]->get_times) <
-        (cloudManager.sstMap[fromKey]->get_times)) {
-      lock_.Unlock();
-    } else {
-      lock_.Unlock();
-      return;
-    }
-  }
-  uint64_t fromSstId = fromKey / 100000;
-  uint64_t blk_num = fromKey % 100000;
-  if (fromSstId == 0) {
-    // fprintf(stderr, "err sstid==0 key==%lu gettimes= %u\n", fromKey,
-    //         cloudManager.sstMap[fromKey]->get_times);
-    lock_.Lock();
-    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
-    SstTemp *t = cloudManager.sstMap[fromSstId];
-    cloudManager.sstMap.erase(fromSstId);
-    delete t;
-    lock_.Unlock();
-    return;
-  }
-  std::string old_fname = TableFileName(db_paths, fromSstId, 0);
-  std::string new_fname = TableFileName(db_paths, fromKey, 1);
-  int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
-  if (readfd == -1) {
-    lock_.Lock();
-    // fprintf(stderr, "file open error1 sstid=%lu\n", fromSstId);
-    SstTemp *t = cloudManager.sstMap[fromSstId];
-    cloudManager.sstMap.erase(fromSstId);
-    delete t;
-    lock_.Unlock();
-    return;
-  }
-  int writefd = open(new_fname.c_str(), O_WRONLY | O_CREAT | O_DIRECT, S_IRWXU);
-  if (writefd == -1) {
-    fprintf(stderr, "file open error2 sstid=%lu\n", fromSstId);
-    close(readfd);
-    return;
-  }
-
-  uint64_t offset = blk_num * blkSize;
-  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
-                                    TokenLimiter::kRead);
-  int ret = pread(readfd, buf_, blkSize, offset);
-  Monitor::CollectIO(6, 1);
-  if (ret == -1) {
-    fprintf(stderr, "pread error\n");
-    close(readfd);
-    close(writefd);
-    return;
-  }
-  ret = pwrite(writefd, buf_, blkSize, 0);
-  // std::flush(writefd);
-  if (ret != blkSize) {
-    fprintf(stderr, "pwrite error\n");
-    close(readfd);
-    close(writefd);
-    return;
-  }
-  close(readfd);
-  close(writefd);
-  // fprintf(stderr, "prefetcher %lu file\n", fromKey);
-  lock_.Lock();  //更新cloudManager ssdManager
-  SstTemp *t = cloudManager.sstMap[fromKey];
-  cloudManager.sstMap.erase(fromKey);
-  ssdManager.sstMap[fromKey] = t;
-  if (outKey != 0) {
-    t = ssdManager.sstMap[outKey];
-    ssdManager.sstMap.erase(outKey);
-    cloudManager.sstMap[outKey] = t;
-    // fprintf(stderr, "remove %lu file\n", outKey);
-    std::string remove_fname = TableFileName(db_paths, outKey, 1);
-    if (remove(remove_fname.c_str()) != 0) {
-      fprintf(stderr, "remove error\n");
-    }
-  }
-  // fprintf(stderr, "prefetcher end\n");
-  lock_.Unlock();
-}
 void Prefetcher::_CaluateSstHeat() {
   lock_sst_io.Lock();
   std::unordered_map<uint64_t, int> temp_sst_iotimes(sst_iotimes);
@@ -498,25 +263,11 @@ void Prefetcher::_CaluateSstHeat() {
     if (cloudManager.sstMap.find(it->first) != cloudManager.sstMap.end()) {
       auto p = cloudManager.sstMap[it->first];
       p->get_times = ((p->get_times) + it->second) / 2;
-      if (p->get_times || it->second) {
-        // fprintf(stderr,"cloud:get_times:%d last1s
-        // times:%d\n",p->get_times,it->second);
-        notZeroCloud1++;
-      }
     } else if (ssdManager.sstMap.find(it->first) != ssdManager.sstMap.end()) {
       auto p = ssdManager.sstMap[it->first];
       p->get_times = ((p->get_times) + it->second) / 2;
-      if (p->get_times || it->second) {
-        // fprintf(stderr,"ssd:get_times:%d last1s
-        // times:%d\n",p->get_times,it->second);
-        notZeroSsd++;
-      }
     } else {
       cloudManager.sstMap[it->first] = new SstTemp(it->first, it->second / 2);
-      if (it->second) {
-        // fprintf(stderr,"cloud:last1s times:%d\n",it->second);
-        notZeroCloud2++;
-      }
     }
   }
   for (auto it = cloudManager.sstMap.begin(); it != cloudManager.sstMap.end();
@@ -547,20 +298,12 @@ void Prefetcher::_CaluateSstHeat() {
         tempLog,
         "prefetch hit:%d  prefetchAll:%d\nblkcache hit:%d  blkcacheAll:%d\n",
         hit_times, all_times, blkcache_hit_times, blkcache_all_times);
-    fprintf(tempLog, "KVcache hit:%d  KVcacheAll:%d\n", KVcache_hit_times,
-            KVcache_all_times);
-    fprintf(tempLog, "notZeroCloud1:%d notZeroCloud2:%d notZeroSsd:%d\n",
-            notZeroCloud1, notZeroCloud2, notZeroSsd);
     fflush(tempLog);
     hit_times = 0;
     all_times = 0;
     blkcache_hit_times = 0;
     blkcache_all_times = 0;
-    KVcache_hit_times = 0;
-    KVcache_all_times = 0;
   }
-  // cloudManager.sortSst();
-  // ssdManager.sortSst();
   lock_.Unlock();
 }
 
@@ -615,104 +358,9 @@ size_t Prefetcher::_PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
   lock_mem.Unlock();
   return left;
 }
-size_t Prefetcher::_PrefetcherOneFile(uint64_t key, uint64_t offset, size_t n,
-                                      char *scratch) {
-  size_t errorFlag = n + 1;
-  std::string fname = TableFileName(db_paths, key, 1);
-  int fd = open(fname.c_str(), O_RDONLY | O_DIRECT);
-  if (fd < 0) {
-    fprintf(stderr, "_TryGetFromPrefetcher file open error\n");
-    return errorFlag;
-  }
-  Status s;
-  ssize_t r = -1;
-  size_t left = n;
-  char *ptr = scratch;
-  while (left > 0) {
-    r = pread(fd, ptr, left, static_cast<off_t>(offset));
-    if (r <= 0) {
-      if (r == -1 && errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    ptr += r;
-    offset += r;
-    left -= r;
-  }
-  if (r < 0) {
-    // An error: return a non-ok status
-    fprintf(stderr, "IOerror\n");
-    close(fd);
-    return errorFlag;
-  }
-  close(fd);
-  return left;
-}
-size_t Prefetcher::_PrefetcherTwoFiles(uint64_t key, uint64_t offset, size_t n,
-                                       char *scratch) {
-  fprintf(stderr, "_PrefetcherTwoFiles begin\n");
-  size_t errorFlag = n + 1;
-  std::string fname1 = TableFileName(db_paths, key, 1);
-  std::string fname2 = TableFileName(db_paths, key + 1, 1);
-  int fd1 = open(fname1.c_str(), O_RDONLY);
-  int fd2 = open(fname1.c_str(), O_RDONLY);
-  if (fd1 < 0 || fd2 < 0) {
-    fprintf(stderr, "_TryGetFromPrefetcher file open error\n");
-    return false;
-  }
-  Status s;
-  ssize_t r = -1;
-  size_t left = blkSize - offset;
-  char *ptr = scratch;
-  while (left > 0) {
-    r = pread(fd1, ptr, left, static_cast<off_t>(offset));
-    if (r <= 0) {
-      if (r == -1 && errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    ptr += r;
-    offset += r;
-    left -= r;
-  }
-  if (r < 0 || left != 0) {
-    // An error: return a non-ok status
-    fprintf(stderr, "IOerror\n");
-    close(fd1);
-    close(fd2);
-    return errorFlag;
-  }
-  left = n - (blkSize - offset);
-  offset = 0;
-  while (left > 0) {
-    r = pread(fd2, ptr, left, static_cast<off_t>(offset));
-    if (r <= 0) {
-      if (r == -1 && errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    ptr += r;
-    offset += r;
-    left -= r;
-  }
-  if (r < 0) {
-    // An error: return a non-ok status
-    fprintf(stderr, "IOerror\n");
-    close(fd1);
-    close(fd2);
-    return errorFlag;
-  }
-  close(fd1);
-  close(fd2);
-  fprintf(stderr, "_PrefetcherTwoFiles end\n");
-  return left;
-}
+
 size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
                                          size_t n, char *scratch) {
-  // fprintf(stderr,"size:%d\n",n);
   all_times++;
   all_prefetch_all_times++;
   size_t errorFlag = n + 1;
@@ -722,11 +370,9 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
     if (n <= blkSize &&
         ssdManager.sstMap.find(key) != ssdManager.sstMap.end() &&
         ssdManager.sstMap.find(key + 1) != ssdManager.sstMap.end()) {
-      // fprintf(stderr, "need 2 blocks size==%d\n",n);
       size_t re = errorFlag;
       re = _Prefetcher2BlocksFromMem(key, offset, n, scratch);
       if (re != errorFlag) {
-        // fprintf(stderr, "hit\n");
         hit_times++;
         all_prefetch_hit_times++;
       }
@@ -738,10 +384,8 @@ size_t Prefetcher::_TryGetFromPrefetcher(uint64_t sst_id, uint64_t offset,
       return errorFlag;
     }
     size_t re = errorFlag;
-    // re=_PrefetcherOneFile(key, offset, n, scratch);
     re = _PrefetcherFromMem(key, offset, n, scratch);
     if (re != errorFlag) {
-      // fprintf(stderr, "hit\n");
       hit_times++;
       all_prefetch_hit_times++;
     }
@@ -771,7 +415,6 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
   if (inited) {
     return;
   }
-  cache = new LRUCache(350 * 1024);
   inited = true;
   impl_ = impl;
 
@@ -801,7 +444,8 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
             "#type mean   25th   50th   75th    90th    99th    99.9th ");
     fprintf(logFp_prefetch_times, "#time  prefetch_times");
     fprintf(logFp_limiter_time,
-            "#time prefetch  compaction  flush&l0compaction  prefetch_iops  compaction_iops\n");
+            "#time prefetch  compaction  flush&l0compaction  prefetch_iops  "
+            "compaction_iops\n");
     tiktok_start = now();
     prefetch_start = now();
     limiter_star_time = now();
@@ -832,7 +476,6 @@ int64_t Prefetcher::now() {
 void Prefetcher::SstRead(uint64_t sst_id, uint64_t offset, size_t size,
                          bool isGp2)  //更新sst的读写次数(热度)
 {
-  // fprintf(stderr,"size=%d\n",size);
   if (sst_id == 0) {
     return;
   }
@@ -845,7 +488,6 @@ void Prefetcher::_SstRead(uint64_t sst_id, uint64_t offset, size_t size,
   int blk_num = offset / (blkSize);
 
   uint64_t key = sst_id * 100000 + blk_num;
-  // fprintf(stderr, "sst: %lu offset: %lu  key:%lu \n", sst_id, offset, key);
   lock_sst_io.Lock();
   sst_iotimes[key]++;
   if ((offset % (blkSize)) + size >= (blkSize)) {
