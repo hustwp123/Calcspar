@@ -59,7 +59,7 @@ Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
   Handle* t=GetShard(Shard(hash))->Lookup(key, hash);
   if(t!=nullptr)
   {
-    Prefetcher::blkcacheGet();
+    Prefetcher::blkcacheGet(key);
   }
   return t;
 }

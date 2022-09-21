@@ -145,7 +145,7 @@ class Prefetcher {
 
   DBImpl *impl_;
   bool paused=false;
-  std::list<int> lastIOPS;//过去10秒内的IOPS
+  std::list<int> lastIOPS;
   uint64_t hit_times=0;
   uint64_t all_times=0;
 
@@ -219,6 +219,13 @@ class Prefetcher {
 
   mutable port::Mutex lock_mem;        // synchronization primitive
 
+  mutable port::Mutex lock_blkcache;        // synchronization primitive
+  mutable port::Mutex lock_blkcache2; 
+
+  std::unordered_map<std::string, int> blkcache_iotimes;
+  std::unordered_map<std::string, double> blkcache_heat;
+  double blkcacheMinHeats=0;
+
 
 
   std::unordered_map<uint64_t, int>
@@ -250,8 +257,11 @@ class Prefetcher {
                             char* scratch);
 
   static void blkcacheInsert();
+  static void blkcacheInsert(const Slice& key,uint64_t PrefetchKey);
   static void blkcacheTryGet();
-  static void blkcacheGet();
+  static void blkcacheGet(const Slice& key);
+  std::vector<std::string> delKeys;
+  static void blkcacheDelete(const Slice& key);
 
 
   static void RecordLimiterTime(uint64_t prefetch,uint64_t compaction,uint64_t flush);

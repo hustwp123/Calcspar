@@ -734,31 +734,26 @@ ColumnFamilyData::GetWriteStallConditionAndCause(
   
   if (!mutable_cf_options.disable_auto_compactions &&
              num_l0_files >= tl0stop/4*3) {
-              fprintf(stderr,"con 1\n");
     return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
   } else if (!mutable_cf_options.disable_auto_compactions &&
              mutable_cf_options.hard_pending_compaction_bytes_limit > 0 &&
              num_compaction_needed_bytes >=
                  mutable_cf_options.hard_pending_compaction_bytes_limit/4*3) {
-                  fprintf(stderr,"con 2\n");
     return {WriteStallCondition::kNormal,
             WriteStallCause::kL0Slow};
   } else if (mutable_cf_options.max_write_buffer_number > 3 &&
              num_unflushed_memtables >=
                  mutable_cf_options.max_write_buffer_number - 1) {
-                  fprintf(stderr,"con 3\n");
     return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
   } else if (!mutable_cf_options.disable_auto_compactions &&
              tl0slowdown >= 0 &&
              num_l0_files >=
                  tl0slowdown/4*3) {
-                  fprintf(stderr,"con 4\n");
     return {WriteStallCondition::kNormal, WriteStallCause::kL0Slow};
   } else if (!mutable_cf_options.disable_auto_compactions &&
              mutable_cf_options.soft_pending_compaction_bytes_limit > 0 &&
              num_compaction_needed_bytes >=
                  mutable_cf_options.soft_pending_compaction_bytes_limit/4*3) {
-                  fprintf(stderr,"con 5\n");
     return {WriteStallCondition::kNormal,
             WriteStallCause::kOther};
   }

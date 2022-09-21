@@ -196,6 +196,13 @@ inline void BlockFetcher::GetBlockContents() {
 }
 
 Status BlockFetcher::ReadBlockContents() {
+  uint64_t sst_id = TableFileNameToNumber(file_->file_name());
+  uint64_t offset=handle_.offset();
+  int blk_num = offset / ((256*1024));
+  uint64_t key = sst_id * 100000 + blk_num;
+  // fprintf(stderr,"prefetch key %lu 0\n",key);
+  contents_->PrefetcherKey=key;
+
   block_size_ = static_cast<size_t>(handle_.size());
 
   if (TryGetUncompressBlockFromPersistentCache()) {

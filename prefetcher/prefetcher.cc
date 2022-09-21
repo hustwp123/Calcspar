@@ -16,10 +16,9 @@ const size_t MAXSSTNUM =
 std::atomic<bool> pauseComapaction;
 
 std::vector<DbPath> db_paths = {
-    {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+    {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
     {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
 };
-
 
 Prefetcher::~Prefetcher() {
   pauseComapaction = false;
@@ -115,15 +114,48 @@ void Prefetcher::blkcacheInsert() {
   i.blkcache_insert_times++;
 }
 
+void Prefetcher::blkcacheInsert(const Slice &hashKey, uint64_t PrefetchKey) {
+  static Prefetcher &i = _GetInst();
+  i.lock_blkcache.Lock();
+  std::string s(hashKey.data(), hashKey.size());
+  if (i.cloudManager.sstMap.find(PrefetchKey) != i.cloudManager.sstMap.end()) {
+    i.blkcache_iotimes[s] =
+        (i.cloudManager.sstMap[PrefetchKey]->get_times) / 64 + 1;
+  } else if (i.ssdManager.sstMap.find(PrefetchKey) !=
+             i.ssdManager.sstMap.end()) {
+    i.blkcache_iotimes[s] =
+        (i.ssdManager.sstMap[PrefetchKey]->get_times) / 64 + 1;
+  } else {
+    i.blkcache_iotimes[s] = 1;
+  }
+  i.lock_blkcache.Unlock();
+
+  i.blkcache_insert_times++;
+}
+
 void Prefetcher::blkcacheTryGet() {
   static Prefetcher &i = _GetInst();
   i.blkcache_all_times++;
   i.all_blkcache_all_times++;
 }
-void Prefetcher::blkcacheGet() {
+void Prefetcher::blkcacheGet(const Slice &hashKey) {
   static Prefetcher &i = _GetInst();
+  i.lock_blkcache.Lock();
+  std::string s(hashKey.data(), hashKey.size());
   i.blkcache_hit_times++;
   i.all_blkcache_hit_times++;
+  i.blkcache_iotimes[s]++;
+  i.lock_blkcache.Unlock();
+}
+
+void Prefetcher::blkcacheDelete(const Slice &hashKey) {
+  static Prefetcher &i = _GetInst();
+  std::string s(hashKey.data(), hashKey.size());
+  i.lock_blkcache2.Lock();
+  i.delKeys.push_back(s);
+  i.lock_blkcache2.Unlock();
+
+  // i.blkcache_heat.erase(s);
 }
 
 void Prefetcher::CaluateSstHeat() {
@@ -143,12 +175,15 @@ void Prefetcher::_PrefetcherToMem() {
   }
   fromKey = cloudManager.getMax();
   uint64_t coldKey = ssdManager.getMin();
-  if (ssdManager.sstMap[coldKey]->get_times <= 0.6) {
-    SstTemp* t = ssdManager.sstMap[coldKey];
+
+  if (ssdManager.sstMap.find(coldKey) != ssdManager.sstMap.end() &&
+      (ssdManager.sstMap[coldKey]->get_times <= 0.6 ||
+       ssdManager.sstMap[coldKey]->get_times < blkcacheMinHeats)) {
+    SstTemp *t = ssdManager.sstMap[coldKey];
+
     ssdManager.sstMap.erase(coldKey);
     cloudManager.sstMap[coldKey] = t;
-
-    char* temp = sst_blocks[coldKey];
+    char *temp = sst_blocks[coldKey];
     lock_mem.Lock();
     if (temp != nullptr) {
       sst_blocks.erase(coldKey);
@@ -156,7 +191,8 @@ void Prefetcher::_PrefetcherToMem() {
     }
     lock_mem.Unlock();
   }
-  if (cloudManager.sstMap[fromKey]->get_times <= 1.01) {
+  if (cloudManager.sstMap[fromKey]->get_times <= 1.01 ||
+      cloudManager.sstMap[fromKey]->get_times < blkcacheMinHeats) {
     lock_.Unlock();
     return;
   }
@@ -221,7 +257,6 @@ void Prefetcher::_PrefetcherToMem() {
   lock_mem.Lock();
   sst_blocks[fromKey] = temp;
   lock_mem.Unlock();
-
   cloudManager.sstMap.erase(fromKey);
   ssdManager.sstMap[fromKey] = t;
   if (outKey != 0) {
@@ -246,7 +281,6 @@ void Prefetcher::_PrefetcherToMem() {
     prefetch_start = now();
     t_prefetch_times = 0;
   }
-
   lock_.Unlock();
 }
 
@@ -255,7 +289,40 @@ void Prefetcher::_CaluateSstHeat() {
   std::unordered_map<uint64_t, int> temp_sst_iotimes(sst_iotimes);
   sst_iotimes.clear();
   lock_sst_io.Unlock();
+
+  lock_blkcache.Lock();
+  std::unordered_map<std::string, int> temp_blkcache_iotimes(blkcache_iotimes);
+  blkcache_iotimes.clear();
+  lock_blkcache.Unlock();
+
+  for (auto it = temp_blkcache_iotimes.begin();
+       it != temp_blkcache_iotimes.end(); it++) {
+    if (blkcache_heat.find(it->first) != blkcache_heat.end()) {
+      blkcache_heat[it->first] = (blkcache_heat[it->first] + it->second) / 2;
+    } else {
+      blkcache_heat[it->first] = it->second / 2;
+    }
+  }
+  lock_blkcache2.Lock();
+  for (int i = 0; i < delKeys.size(); i++) {
+    blkcache_heat.erase(delKeys[i]);
+  }
+  delKeys.clear();
+  lock_blkcache2.Unlock();
+  std::vector<double> heats;
+  for (auto it = blkcache_heat.begin(); it != blkcache_heat.end(); it++) {
+    heats.push_back(it->second);
+    if (temp_blkcache_iotimes.find(it->first) == temp_blkcache_iotimes.end()) {
+      it->second /= 2;
+    }
+  }
+  sort(heats.begin(), heats.end());
+  double minHeats = 0;
+  for (int i = 0; i < heats.size() && i < 64; i++) {
+    minHeats += heats[i];
+  }
   lock_.Lock();
+  blkcacheMinHeats = heats.size()>500?minHeats:0;
   int notZeroCloud1 = 0;
   int notZeroCloud2 = 0;
   int notZeroSsd = 0;

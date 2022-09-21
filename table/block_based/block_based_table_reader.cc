@@ -54,6 +54,9 @@
 #include "util/string_util.h"
 #include "util/xxhash.h"
 
+#include "util/hash.h"
+#include "prefetcher/prefetcher.h"
+
 namespace rocksdb {
 
 extern const uint64_t kBlockBasedTableMagicNumber;
@@ -1815,6 +1818,7 @@ Status BlockBasedTable::PutDataBlockToCache(
     // an object in the stack.
     BlockContents* block_cont_for_comp_cache =
         new BlockContents(std::move(*raw_block_contents));
+    // fprintf(stderr,"prefetch key %lu 1\n",raw_block_contents->PrefetcherKey);
     s = block_cache_compressed->Insert(
         compressed_block_cache_key, block_cont_for_comp_cache,
         block_cont_for_comp_cache->ApproximateMemoryUsage(),
@@ -1832,6 +1836,10 @@ Status BlockBasedTable::PutDataBlockToCache(
   if (block_cache != nullptr && block_holder->own_bytes()) {
     size_t charge = block_holder->ApproximateMemoryUsage();
     Cache::Handle* cache_handle = nullptr;
+    // fprintf(stderr,"prefetch key %lu 2\n",raw_block_contents->PrefetcherKey);
+
+    Prefetcher::blkcacheInsert(block_cache_key,raw_block_contents->PrefetcherKey);
+
     s = block_cache->Insert(block_cache_key, block_holder.get(), charge,
                             &DeleteCachedEntry<TBlocklike>, &cache_handle,
                             priority);

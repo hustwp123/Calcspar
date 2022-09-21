@@ -231,6 +231,7 @@ inline CompressionType get_block_compression_type(const char* block_data,
 // BlockContents objects representing data read from mmapped files only point
 // into the mmapped region.
 struct BlockContents {
+  uint64_t PrefetcherKey=0;
   Slice data;  // Actual contents of data
   CacheAllocationPtr allocation;
 

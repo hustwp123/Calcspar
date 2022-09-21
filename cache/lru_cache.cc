@@ -16,6 +16,8 @@
 
 #include "util/mutexlock.h"
 
+#include "prefetcher/prefetcher.h"
+
 namespace rocksdb {
 
 LRUHandleTable::LRUHandleTable() : list_(nullptr), length_(0), elems_(0) {
@@ -230,6 +232,7 @@ void LRUCacheShard::EvictFromLRU(size_t charge,
     assert(old->InCache() && !old->HasRefs());
     LRU_Remove(old);
     table_.Remove(old->key(), old->hash);
+    Prefetcher::blkcacheDelete(old->key());
     old->SetInCache(false);
     usage_ -= old->charge;
     deleted->push_back(old);
