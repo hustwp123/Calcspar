@@ -46,7 +46,7 @@ Prefetcher::~Prefetcher() {
     free(hdr_last_1s_size);
   }
 
-  if (tempLog) {
+  if (logRWlat) {
     fprintf(tempLog, "/n/n/n cache hit times\n");
     fprintf(tempLog, "prefetcher hit times: %lu    all times: %lu\n",
             all_prefetch_hit_times, all_prefetch_all_times);
@@ -323,9 +323,6 @@ void Prefetcher::_CaluateSstHeat() {
   }
   lock_.Lock();
   blkcacheMinHeats = heats.size()>500?minHeats:0;
-  int notZeroCloud1 = 0;
-  int notZeroCloud2 = 0;
-  int notZeroSsd = 0;
   for (auto it = temp_sst_iotimes.begin(); it != temp_sst_iotimes.end(); it++) {
     if (cloudManager.sstMap.find(it->first) != cloudManager.sstMap.end()) {
       auto p = cloudManager.sstMap[it->first];
@@ -360,7 +357,7 @@ void Prefetcher::_CaluateSstHeat() {
     options_->block_cache->SetCapacity(size);
     fprintf(stderr, "blkcache size=%d\n", size);
   }
-  if (tempLog) {
+  if (logRWlat) {
     fprintf(
         tempLog,
         "prefetch hit:%d  prefetchAll:%d\nblkcache hit:%d  blkcacheAll:%d\n",
@@ -386,7 +383,6 @@ size_t Prefetcher::_Prefetcher2BlocksFromMem(uint64_t key, uint64_t offset,
   char *temp = sst_blocks[key];
   size_t errorFlag = n + 1;
   if (temp == nullptr) {
-    fprintf(stderr, "err\n");
     lock_mem.Unlock();
     return errorFlag;
   }
@@ -397,7 +393,6 @@ size_t Prefetcher::_Prefetcher2BlocksFromMem(uint64_t key, uint64_t offset,
   }
   char *temp2 = sst_blocks[key + 1];
   if (temp == nullptr) {
-    fprintf(stderr, "err\n");
     lock_mem.Unlock();
     return errorFlag;
   }
@@ -416,7 +411,6 @@ size_t Prefetcher::_PrefetcherFromMem(uint64_t key, uint64_t offset, size_t n,
   char *temp = sst_blocks[key];
   size_t errorFlag = n + 1;
   if (temp == nullptr) {
-    fprintf(stderr, "err\n");
     lock_mem.Unlock();
     return errorFlag;
   }
@@ -485,10 +479,6 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
   inited = true;
   impl_ = impl;
 
-  if (tempLog == nullptr) {
-    tempLog = fopen("./hit_ratio.log", "a+");
-  }
-
   if (logRWlat) {
     hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_read);
     hdr_init(1, INT64_C(3600000000), 3, &hdr_last_1s_write);
@@ -496,6 +486,7 @@ void Prefetcher::_Init(DBImpl *impl, bool doPrefetch_) {
     readiops = 0;
     writeiops = 0;
     tiktoks = 0;
+    tempLog = fopen("./hit_ratio.log", "a+");
     logFp_read = std::fopen("./ssd_rlat.log", "w+");
     logFp_write = std::fopen("./ssd_wlat.log", "w+");
     logFp_size = std::fopen("./ssd_size.log", "w+");
@@ -650,6 +641,7 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
       latency_hiccup_write(writeiops);
       latency_hiccup_size();
     }
+    /*
     bool doPause = false;
     if (doPause) {
       if (lastIOPS.size() < 10) {
@@ -679,6 +671,7 @@ void Prefetcher::_RecordTime(int op, uint64_t tx_xtime,
         }
       }
     }
+    */
 
     tiktok_start = now();
     readiops = 0;
