@@ -21,6 +21,12 @@ void Monitor::Init(){
   i._Init();
 }
 
+int Monitor::GetHighUsed()
+{
+  static Monitor& i = _GetInst();
+  return i.left;
+} 
+
 void Monitor::_Init() {
     log_ = fopen("./Monitor.log","a+");
     if(log_==NULL) {
@@ -45,6 +51,7 @@ void Monitor::_print(){
   while(!print_io_stop) {
     sleep(1);
     io_lock_.lock();
+    left=io_[1];
       fprintf(log_,"%d  ",t);
       for(int i=0;i<7;i++){
         fprintf(log_,"%d  ",io_[i]);

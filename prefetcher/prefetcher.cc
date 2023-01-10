@@ -5,6 +5,7 @@
 #include "db/db_impl/db_impl.h"
 #include "util/token_limiter.h"
 #include "zyh/monitor.h"
+#include "token_limiter2/token_limiter2.h"
 
 namespace rocksdb {
 
@@ -16,8 +17,8 @@ const size_t MAXSSTNUM =
 std::atomic<bool> pauseComapaction;
 
 std::vector<DbPath> db_paths = {
-    {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
-    {"/home/ubuntu/ssd_150g", 60l * 1024 * 1024 * 1024},
+    {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
+    {"/home/ubuntu/gp2_150g_1", 60l * 1024 * 1024 * 1024},
 };
 
 Prefetcher::~Prefetcher() {
@@ -97,13 +98,13 @@ void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
 
 void Prefetcher::RecordLimiterTime(uint64_t prefetch, uint64_t compaction,
                                    uint64_t flush, int prefetch_iops,
-                                   int compaction_iops, int R2, int R1) {
+                                   int compaction_iops,int high, int R2, int R1) {
   static Prefetcher &i = _GetInst();
   uint64_t t = now();
   int time = (t - i.limiter_star_time) / 1000000000;
   if (i.logRWlat) {
-    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu  %d  %d  R2:%d  R1:%d \n",
-            time, prefetch, compaction, flush, prefetch_iops, compaction_iops,
+    fprintf(i.logFp_limiter_time, "%d  %lu  %lu  %lu  %d  %d  %d  R2:%d  R1:%d \n",
+            time, prefetch, compaction, flush, prefetch_iops, compaction_iops,high,
             R2, R1);
     fflush(i.logFp_limiter_time);
   }
@@ -176,21 +177,21 @@ void Prefetcher::_PrefetcherToMem() {
   fromKey = cloudManager.getMax();
   uint64_t coldKey = ssdManager.getMin();
 
-  if (ssdManager.sstMap.find(coldKey) != ssdManager.sstMap.end() &&
-      (ssdManager.sstMap[coldKey]->get_times <= 0.6 ||
-       ssdManager.sstMap[coldKey]->get_times < blkcacheMinHeats)) {
-    SstTemp *t = ssdManager.sstMap[coldKey];
+  // if (ssdManager.sstMap.find(coldKey) != ssdManager.sstMap.end() &&
+  //     (ssdManager.sstMap[coldKey]->get_times <= 0.6 ||
+  //      ssdManager.sstMap[coldKey]->get_times < blkcacheMinHeats)) {
+  //   SstTemp *t = ssdManager.sstMap[coldKey];
 
-    ssdManager.sstMap.erase(coldKey);
-    cloudManager.sstMap[coldKey] = t;
-    char *temp = sst_blocks[coldKey];
-    lock_mem.Lock();
-    if (temp != nullptr) {
-      sst_blocks.erase(coldKey);
-      mems.push_back(temp);
-    }
-    lock_mem.Unlock();
-  }
+  //   ssdManager.sstMap.erase(coldKey);
+  //   cloudManager.sstMap[coldKey] = t;
+  //   char *temp = sst_blocks[coldKey];
+  //   lock_mem.Lock();
+  //   if (temp != nullptr) {
+  //     sst_blocks.erase(coldKey);
+  //     mems.push_back(temp);
+  //   }
+  //   lock_mem.Unlock();
+  // }
   if (cloudManager.sstMap[fromKey]->get_times <= 1.01 ||
       cloudManager.sstMap[fromKey]->get_times < blkcacheMinHeats) {
     lock_.Unlock();
@@ -225,7 +226,7 @@ void Prefetcher::_PrefetcherToMem() {
   int readfd = open(old_fname.c_str(), O_RDONLY | O_DIRECT);
   if (readfd == -1) {
     lock_.Lock();
-    fprintf(stderr, "open error fname:%s \n", old_fname.c_str());
+    // fprintf(stderr, "open error fname:%s \n", old_fname.c_str());
     SstTemp *t = cloudManager.sstMap[fromKey];
     cloudManager.sstMap.erase(fromKey);
     delete t;
@@ -233,8 +234,8 @@ void Prefetcher::_PrefetcherToMem() {
     return;
   }
   uint64_t offset = blk_num * blkSize;
-  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,
-                                    TokenLimiter::kRead);
+  TokenLimiter::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,TokenLimiter::kRead);
+  TokenLimiter2::RequestDefaultToken(Env::IOSource::IO_SRC_PREFETCH,TokenLimiter2::kRead);
   int ret = pread(readfd, buf_, blkSize, offset);
   Monitor::CollectIO(6, 1);
   if (ret == -1) {
@@ -355,6 +356,7 @@ void Prefetcher::_CaluateSstHeat() {
     calcuTimes = 0;
     uint64_t size = CacheSize - (ssdManager.sstMap.size() * blkSize);
     options_->block_cache->SetCapacity(size);
+    fprintf(stderr, "ssdManager.sstMap.size() size=%d\n", ssdManager.sstMap.size());
     fprintf(stderr, "blkcache size=%d\n", size);
   }
   if (logRWlat) {

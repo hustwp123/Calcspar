@@ -13,7 +13,7 @@ class Monitor {
 // 记录不同的IO
     FILE* log_;
 
-    std::vector<int> io_;
+    
     std::mutex io_lock_;
 
     // 获取静态实例
@@ -33,12 +33,15 @@ class Monitor {
     void _Shutdown(); 
 
 public: 
+std::vector<int> io_;
     Monitor();
     // 初始化
     static void Init();
     // 收集IO
     static void CollectIO(int type, int num = 1);
-    static void Shutdown();    
+    static void Shutdown();  
+    static int GetHighUsed();  
+    int left=0;   
 
 };
 

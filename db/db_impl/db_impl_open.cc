@@ -23,6 +23,8 @@
 
 #include "util/token_limiter.h"
 #include "zyh/monitor.h"
+#include "ratelimiter2/rate_limiter.h"
+#include "token_limiter2/token_limiter2.h"
 
 namespace rocksdb {
 Options SanitizeOptions(const std::string& dbname, const Options& src) {
@@ -1327,6 +1329,8 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   impl->wal_in_db_path_ =
       IsWalDirSameAsDBPath(&impl->immutable_db_options_);
 
+  
+
   Monitor::Init();
 
   // Prefetcher::Init(impl,false);
@@ -1334,9 +1338,11 @@ Status DBImpl::Open(const DBOptions& db_options, const std::string& dbname,
   
 
   Prefetcher::Init(impl,true);
-  TokenLimiter::SetDefaultInstance(
-      std::unique_ptr<TokenLimiter>(new TokenLimiter(2000)));
+  // TokenLimiter::SetDefaultInstance(
+  //     std::unique_ptr<TokenLimiter>(new TokenLimiter(1000)));
 
+  TokenLimiter2::SetDefaultInstance(
+      std::unique_ptr<TokenLimiter2>(new TokenLimiter2(700,200,100)));
 
   impl->mutex_.Lock();
   // Handles create_if_missing, error_if_exists

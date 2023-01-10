@@ -151,15 +151,22 @@ void TokenLimiter::RequestToken(Env::IOSource io_src, IOType io_type,
     R_1=tokens_per_sec_-available_tokens_;
     if(R_2>=0&&R_1>=0)
     {
-      
       I_middle=std::max((double)0,I_middle+0.7*(R_2-R_1));
       I_low=std::max((double)0,I_low+0.3*(R_2-R_1));
       T_middle=1000000-I_middle*500*1.5;
       T_low=1000000-I_low*500*1.5;
+      T_middle=std::min((uint64_t)950*1000,T_middle);
+      
+      // I_middle=std::max((double)0,I_middle+0.7*(R_2-R_1));
+      // I_low=std::max((double)0,I_low+0.3*(R_2-R_1));
+      // T_middle=1000000-I_middle*500*1.5;
+      // T_low=1000000-I_low*500*1.5;
+
+
       // fprintf(stderr,"R2: %d R1:%d T_middle: %lu T_low: %lu\n",R_2,R_1,T_middle,T_low);
       wait_threshold_us_[Env::IO_SRC_COMPACTION]=T_middle;
       wait_threshold_us_[Env::IO_SRC_PREFETCH]=T_low;
-      Prefetcher::RecordLimiterTime(T_low,T_middle,0,I_low,I_middle,R_2,R_1);
+      Prefetcher::RecordLimiterTime(T_low,T_middle,0,I_low,I_middle,1000,R_2,R_1);
 
     }
   }

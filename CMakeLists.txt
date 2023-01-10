@@ -713,6 +713,7 @@ set(SOURCES
         utilities/write_batch_with_index/write_batch_with_index_internal.cc
         prefetcher/prefetcher.cc
         zyh/monitor.cc
+        ratelimiter2/rate_limiter.cpp 
         $<TARGET_OBJECTS:build_version>)
 
 if(HAVE_SSE42 AND NOT MSVC)

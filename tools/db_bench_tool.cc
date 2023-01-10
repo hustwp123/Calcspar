@@ -842,6 +842,7 @@ DEFINE_string(compression_type, "snappy",
               "Algorithm to use to compress the database");
 static enum rocksdb::CompressionType FLAGS_compression_type_e =
     rocksdb::kSnappyCompression;
+    
 
 DEFINE_int64(sample_for_compression, 0, "Sample every N block for compression");
 

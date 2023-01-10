@@ -10,6 +10,7 @@
 #include "prefetcher/prefetcher.h"
 #include "util/token_limiter.h"
 #include "zyh/monitor.h"
+#include "token_limiter2/token_limiter2.h"
 
 #ifdef ROCKSDB_LIB_IO_POSIX
 #include <errno.h>
@@ -93,6 +94,7 @@ bool PosixWrite(int fd, const char* buf, size_t nbyte, Env::IOSource io_src) {
       requestNum++;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite, requestNum);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kWrite, requestNum);
     uint64_t begin = Prefetcher::now();
     ssize_t done = write(fd, src, bytes_to_write);
     uint64_t end = Prefetcher::now();
@@ -135,6 +137,7 @@ bool PosixPositionedWrite(int fd, const char* buf, size_t nbyte, off_t offset,
       requestNum++;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kWrite, requestNum);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kWrite, requestNum);
     uint64_t begin = Prefetcher::now();
     ssize_t done = pwrite(fd, src, bytes_to_write, offset);
     uint64_t end = Prefetcher::now();
@@ -315,6 +318,7 @@ Status PosixSequentialFile::Read(size_t n, Slice* result, char* scratch,
   size_t r = 0;
   do {
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kRead);
     r = fread_unlocked(scratch, 1, n, file_);
   } while (r == 0 && ferror(file_) && errno == EINTR);
   *result = Slice(scratch, r);
@@ -364,6 +368,7 @@ Status PosixSequentialFile::PositionedRead(uint64_t offset, size_t n,
       requestNum++;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kRead, requestNum);
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
@@ -529,6 +534,7 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
       requestNum++;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kRead, requestNum);
     uint64_t begin = Prefetcher::now();
     r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     uint64_t end = Prefetcher::now();
@@ -566,6 +572,7 @@ Status PosixRandomAccessFile::Prefetch(uint64_t offset, size_t n,
   // ?(wnj) we use direct io only?
   if (!use_direct_io()) {
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kRead);
     ssize_t r = 0;
 #ifdef OS_LINUX
     r = readahead(fd_, offset, n);
@@ -1221,6 +1228,7 @@ Status PosixRandomRWFile::Read(uint64_t offset, size_t n, Slice* result,
       requestNum++;
     }
     TokenLimiter::RequestDefaultToken(io_src, TokenLimiter::kRead, requestNum);
+    TokenLimiter2::RequestDefaultToken(io_src, TokenLimiter2::kRead, requestNum);
     ssize_t done = pread(fd_, ptr, left, offset);
     if (done < 0) {
       // error while reading from file
